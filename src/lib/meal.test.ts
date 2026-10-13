@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { MENU } from './menu'
 import {
-  addDays, aisleOf, dailySeed, drawMeal, fmtQty, fmtSauce, isLight, keysOf, parseIngInput, rng, roundQty,
+  addDays, aisleOf, cookWindow, fmtClock, parseClock, taipeiMinutes, dailySeed, drawMeal, fmtQty, fmtSauce, isLight, keysOf, parseIngInput, rng, roundQty,
   sauceAmt, slotsFor, taipeiToday, totals, weekStart, type Pool,
 } from './meal'
 import type { People } from './types'
@@ -120,6 +120,13 @@ describe('日期與輸入', () => {
     expect(addDays('2026-10-31', 1)).toBe('2026-11-01')
     expect(weekStart('2026-10-18')).toBe('2026-10-12')
     expect(weekStart('2026-10-12')).toBe('2026-10-12')
+  })
+  it('下班後可以煮多久', () => {
+    expect(taipeiMinutes(new Date('2026-10-13T09:40:00Z'))).toBe(17 * 60 + 40)
+    expect(cookWindow(17 * 60 + 40, 30, 19 * 60)).toEqual({ home: 18 * 60 + 10, avail: 50, limit: 50, rushed: false })
+    expect(cookWindow(18 * 60 + 40, 30, 19 * 60)).toMatchObject({ avail: -10, limit: 15, rushed: true })
+    expect(fmtClock(18 * 60 + 5)).toBe('18:05')
+    expect(parseClock('07:30')).toBe(450)
   })
   it('自己加菜的材料', () => {
     expect(parseIngInput('牛肉片 300g 洋蔥 1顆')).toEqual([['牛肉片', 300, 'g'], ['洋蔥', 1, '顆']])

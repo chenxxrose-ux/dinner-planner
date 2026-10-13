@@ -4,6 +4,8 @@ import { test, expect } from '@playwright/test'
 const OUT = 'test-results/screens'
 
 test('每個畫面', async ({ browser }) => {
+  // 從「還沒下班」開始截圖
+  await fetch('http://localhost:54321/__test/sql', { method: 'POST', body: JSON.stringify({ sql: 'update public.dp_days set off_at = null, avail_min = null, cooked = false', params: [] }) })
   const ctx = await browser.newContext()
   const p = await ctx.newPage()
   await p.goto('/')
@@ -11,6 +13,9 @@ test('每個畫面', async ({ browser }) => {
   await p.getByLabel('Email').fill('mom@test.local')
   await p.getByLabel('密碼').fill('test-password')
   await p.getByRole('button', { name: '登入' }).click()
+  await expect(p.getByText('下班了嗎？')).toBeVisible()
+  await p.screenshot({ path: `${OUT}/0b-下班.png`, fullPage: true })
+  await p.getByRole('button', { name: '我下班了' }).click()
   await expect(p.locator('.meal .dish').first()).toBeVisible()
   await p.screenshot({ path: `${OUT}/1-今晚.png`, fullPage: true })
   // 按「做法 ↓」跳到那道菜的步驟

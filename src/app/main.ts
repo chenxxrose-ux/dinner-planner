@@ -1,11 +1,12 @@
 import './globals.css'
 import { store } from '../features/data/store'
 import {
-  AISLE_NAMES, KIND, SIZES, TOOL, addDays, dailySeed, daysAgo, drawMeal, fmtQty, fmtSauce, isLight, mealName,
+  AISLE_NAMES, KIND, SIZES, TOOL, addDays, cookWindow, dailySeed, daysAgo, drawMeal, fmtClock, fmtQty, fmtSauce, isLight, limitOf, mealName,
+  parseClock, taipeiMinutes,
   parseIngInput, rng, roundQty, sauceAmt, sizeLabel, slotsFor, taipeiToday, totals, typeOf, weekday, type Meal, type Pool, type Slot,
 } from '../lib/meal'
 import { stepsOf } from '../lib/steps'
-import type { Dish, People } from '../lib/types'
+import type { Day, Dish, People } from '../lib/types'
 
 const WD = ['日', '一', '二', '三', '四', '五', '六']
 const esc = (s: unknown) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
@@ -42,6 +43,18 @@ function pool(): Pool {
 }
 const byName = (name: string) => store.dishes.find((d) => d.name === name)
 
+// 抽菜的條件：按了「我下班了」就用算出來的可以煮幾分鐘，在家就用平常的時間設定
+function drawOpts(row = store.data.days[taipeiToday()]) {
+  const s = store.data.settings
+  const maxMin = row?.offAt && row.avail !== null && row.avail !== undefined ? limitOf(row.avail) : s.maxMin
+  return { maxMin, noHot: s.noHot, diet: s.diet }
+}
+/** 今天還沒按下班（也還沒決定煮什麼）：先不排菜 */
+const waitingOff = () => {
+  const row = store.data.days[taipeiToday()]
+  return !row?.offAt && !row?.cooked
+}
+
 // 今晚的菜：存在 dp_days，兩支手機看到同一組
 function tonight(): { meal: Meal; saved: boolean } {
   const d = store.data
@@ -56,7 +69,8 @@ function tonight(): { meal: Meal; saved: boolean } {
   }
   const p = pool()
   // 今天還沒排：用日期當種子抽，兩支手機會一樣
-  const meal = drawMeal(p, s.people, rng(dailySeed(today, s.people, { ...s, diet: s.diet }, row?.reroll ?? 0)), {}, s)
+  const o = drawOpts(row)
+  const meal = drawMeal(p, s.people, rng(dailySeed(today, s.people, o, row?.reroll ?? 0)), {}, o)
   return { meal, saved: false }
 }
 function saveTonight(meal: Meal, extra: Record<string, unknown> = {}) {
@@ -72,7 +86,8 @@ function redraw(extraSeed = '') {
   const fixed: Meal = {}
   for (const slot of slotsFor(s.people, s.diet)) if (ui.locks[slot] && meal[slot]) fixed[slot] = meal[slot]
   const reroll = (store.data.days[today]?.reroll ?? 0) + (extraSeed ? 0 : 1)
-  const next = drawMeal(pool(), s.people, rng(dailySeed(today, s.people, s, reroll, extraSeed)), fixed, s)
+  const o = drawOpts()
+  const next = drawMeal(pool(), s.people, rng(dailySeed(today, s.people, o, reroll, extraSeed)), fixed, o)
   saveTonight(next, extraSeed ? { cooked: false } : { reroll, cooked: false })
 }
 
@@ -117,6 +132,7 @@ function viewTonight() {
   const s = d.settings
   const today = taipeiToday()
   const n = s.people
+  if (waitingOff()) return viewOffGate()
   const slots = slotsFor(n, s.diet)
   const { meal } = tonight()
   const ds = slots.map((sl) => meal[sl] && byName(meal[sl]!)).filter(Boolean) as Dish[]
@@ -128,13 +144,12 @@ function viewTonight() {
   return `
   <header><h1>今晚煮什麼</h1><span class="date">${dateLabel(today)}</span></header>
   ${banners()}
-  <div class="people" role="group" aria-label="幾個人吃">
-    ${SIZES.map((k) => `<button data-people="${k}" aria-pressed="${n === k}"><b>${k} 人</b><small>${sizeLabel(k, s.diet)}</small></button>`).join('')}
-  </div>
+  ${peopleRow()}
+  ${offInfo(row)}
   <section class="filters" aria-label="條件">
-    <div class="frow"><span class="flabel">時間</span><div class="chips">
+    ${row?.offAt && row.avail !== null ? '' : `<div class="frow"><span class="flabel">時間</span><div class="chips">
       ${([[20, '20 分內'], [30, '30 分內'], [0, '不限']] as const).map(([v, l]) => `<button class="chip" data-time="${v}" aria-pressed="${s.maxMin === v}">${l}</button>`).join('')}</div>
-    </div>
+    </div>`}
     <div class="frow"><span class="flabel">口味</span><div class="chips">
       <button class="chip" data-nohot aria-pressed="${s.noHot}">不要辣</button><button class="chip" data-diet aria-pressed="${s.diet}">草莓減重中</button></div>
     </div>
@@ -194,6 +209,51 @@ function howSection(ds: Dish[], n: People, diet: boolean) {
       ${howSteps(x)}
     </article>`).join('')}
   </section>`
+}
+
+// ───── 下班 ─────
+const COMMUTES = [0, 10, 15, 20, 30, 40, 45, 60, 90]
+function peopleRow() {
+  const s = store.data.settings
+  return `<div class="people" role="group" aria-label="幾個人吃">
+    ${SIZES.map((k) => `<button data-people="${k}" aria-pressed="${s.people === k}"><b>${k} 人</b><small>${sizeLabel(k, s.diet)}</small></button>`).join('')}
+  </div>`
+}
+function viewOffGate() {
+  const s = store.data.settings
+  const now = taipeiMinutes()
+  const w = cookWindow(now, s.commute, s.dinnerMin)
+  return `
+  <header><h1>今晚煮什麼</h1><span class="date">${dateLabel(taipeiToday())}</span></header>
+  ${banners()}
+  <section class="offwork" aria-label="下班">
+    <b class="ow-title">下班了嗎？</b>
+    <p class="ow-sub">按下去，照你到家的時間排今晚的菜。</p>
+    <div class="ow-set">
+      <label for="commute">通勤<select id="commute">${COMMUTES.map((m) => `<option value="${m}" ${m === s.commute ? 'selected' : ''}>${m ? m + ' 分鐘' : '不用通勤'}</option>`).join('')}</select></label>
+      <label for="dinnerAt">想幾點吃<input id="dinnerAt" type="time" value="${fmtClock(s.dinnerMin)}"></label>
+    </div>
+    <div class="ow-calc" role="status">
+      <span>現在 ${fmtClock(now)} 下班，${fmtClock(w.home)} 到家</span>
+      <b>${w.rushed ? `來不及 ${fmtClock(s.dinnerMin)} 吃，挑 ${w.limit} 分鐘內的菜` : `可以煮 ${w.avail} 分鐘`}</b>
+    </div>
+    <button class="btn btn-main ow-go" data-act="off">我下班了</button>
+    <button class="link ow-home" data-act="home">今天在家，直接排</button>
+  </section>
+  ${peopleRow()}
+  <div class="foot"><span></span><button data-act="signout">登出</button></div>`
+}
+// 按了下班之後，在今晚的菜上面說明時間怎麼算的
+function offInfo(row: Day | undefined) {
+  if (!row?.offAt) return ''
+  if (row.avail === null) return `<div class="ow-done"><span>今天在家，照平常的時間排</span><button class="link" data-act="reoff">重按下班</button></div>`
+  const s = store.data.settings
+  const off = taipeiMinutes(new Date(row.offAt))
+  const limit = limitOf(row.avail)
+  return `<div class="ow-done"><div><span>${fmtClock(off)} 下班・${fmtClock(off + s.commute)} 到家・${fmtClock(s.dinnerMin)} 開飯</span>
+    <b>${row.avail < limit ? `時間很趕，只排 ${limit} 分鐘內的菜` : `可以煮 ${limit} 分鐘`}</b>
+    ${limit < 40 ? '<small>電子鍋煮飯要 40 分鐘左右：早上出門前先預約，或用冷凍白飯。</small>' : ''}</div>
+    <button class="link" data-act="reoff">重按</button></div>`
 }
 
 // ───── 這週 ─────
@@ -359,11 +419,34 @@ function render() {
 }
 
 // ───── 操作 ─────
+// 按「我下班了」：算出可以煮幾分鐘，照這個時間排今晚的菜（兩支手機一起看到）
+function offWork(home: boolean) {
+  const today = taipeiToday()
+  const d = store.data
+  const s = d.settings
+  const row = d.days[today]
+  const avail = home ? null : cookWindow(taipeiMinutes(), s.commute, s.dinnerMin).avail
+  const o = { maxMin: avail === null ? s.maxMin : limitOf(avail), noHot: s.noHot, diet: s.diet }
+  const slots = slotsFor(s.people, s.diet)
+  // 這週已經排好的菜來得及就照排，來不及才重抽
+  const planned = row?.dishes && row.people === s.people && row.dishes.length === slots.length ? row.dishes : null
+  const fits = planned && planned.every((n) => (byName(n)?.min ?? 999) <= (o.maxMin || 999))
+  let dishes = fits ? planned : null
+  if (!dishes) {
+    const meal = drawMeal(pool(), s.people, rng(dailySeed(today, s.people, o, row?.reroll ?? 0, '|off')), {}, o)
+    dishes = slots.map((sl) => meal[sl]).filter(Boolean) as string[]
+  }
+  ui.locks = {}
+  store.run('dp_days', { day: today, off_at: new Date().toISOString(), avail_min: avail, dishes, people: s.people, cooked: false })
+  toast(home ? '今天在家，排好了' : `可以煮 ${o.maxMin} 分鐘，排好了`)
+  window.scrollTo(0, 0)
+}
+
 function setSetting(row: Record<string, unknown>) {
   store.run('dp_settings', { id: 1, ...row })
   ui.locks = {}
   // 條件改了，今晚的菜照新條件重抽（已經決定煮的就不動）
-  if (!store.data.days[taipeiToday()]?.cooked) {
+  if (!store.data.days[taipeiToday()]?.cooked && !waitingOff()) {
     const { meal } = tonight()
     saveTonight(meal)
   }
@@ -399,6 +482,12 @@ document.addEventListener('click', (e) => {
     document.getElementById('how-' + ds.how)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     return
   }
+  if (ds.act === 'off' || ds.act === 'home') return offWork(ds.act === 'home')
+  if (ds.act === 'reoff') {
+    // 重按：回到還沒下班的樣子，按了再重新排
+    store.run('dp_days', { day: taipeiToday(), off_at: null, avail_min: null, cooked: false })
+    return
+  }
   if (ds.people) return setSetting({ people: Number(ds.people) as People })
   if (ds.time !== undefined) return setSetting({ max_min: Number(ds.time) })
   if ('nohot' in ds) return setSetting({ no_hot: !data.settings.noHot })
@@ -424,7 +513,7 @@ document.addEventListener('click', (e) => {
     const fixed: Meal = { ...meal }
     delete fixed[slot]
     const s = store.data.settings
-    const next = drawMeal(pool(), s.people, rng(taipeiToday() + '|nope|' + name), fixed, s)
+    const next = drawMeal(pool(), s.people, rng(taipeiToday() + '|nope|' + name), fixed, drawOpts())
     saveTonight(next, { cooked: false })
     toast(`以後不會再出現「${name}」`, () => {
       store.run('dp_marks', { dish: name, banned: false })
@@ -478,6 +567,11 @@ document.addEventListener('input', (e) => {
 document.addEventListener('change', (e) => {
   const t = e.target as HTMLInputElement
   if (t.closest?.('#addForm')) ui.draft[t.id] = t.value
+  if (t.id === 'commute') store.run('dp_settings', { id: 1, commute_min: Number(t.value) })
+  if (t.id === 'dinnerAt') {
+    const m = parseClock(t.value)
+    if (m !== null) store.run('dp_settings', { id: 1, dinner_min: m })
+  }
   if (t.dataset.shop !== undefined) store.run('dp_shop', { week: store.data.week, item: t.dataset.shop, done: t.checked })
 })
 
@@ -521,6 +615,11 @@ document.addEventListener('submit', async (e) => {
 })
 
 store.subscribe(render)
+// 還沒按下班時，「現在幾點下班、可以煮幾分鐘」每 30 秒更新（正在選通勤或時間時不打斷）
+setInterval(() => {
+  const busy = document.activeElement && ['INPUT', 'SELECT'].includes(document.activeElement.tagName)
+  if (store.phase === 'ready' && ui.tab === 'tonight' && waitingOff() && !busy) render()
+}, 30_000)
 render()
 void store.start()
 
