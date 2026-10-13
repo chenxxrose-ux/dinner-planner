@@ -209,7 +209,7 @@ a{color:inherit}
 .ow-done span{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
 .ow-done b{font-size:16px;color:var(--accent)}
 .ow-done small{font-size:12px;color:var(--muted);line-height:1.5}
-.ow-done .link{flex:none;border:0;background:none;color:var(--muted);font-size:14px;padding:4px 0;text-decoration:underline;min-height:32px}
+.ow-undo{flex:none;align-self:center;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;font-size:14px;padding:0 14px;min-height:40px;white-space:nowrap}
 
 /* 作息：今晚最上面的「現在」卡、留給草莓、提醒 */
 :root{--sky:#3E73A8;--sky-soft:#E3EEF8;--rice:#F6EFD9}
@@ -264,3 +264,4 @@ a{color:inherit}
 .rt-blist{margin:0;font-family:var(--display);font-size:17px;line-height:1.5}
 .rt-blist span{white-space:nowrap}
 .rt-box .link{align-self:flex-start}
+.rt-undo{display:block;margin-top:8px;border:0;background:none;padding:4px 0;color:var(--muted);font-size:14px;text-decoration:underline;min-height:32px}

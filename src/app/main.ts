@@ -7,7 +7,7 @@ import {
 } from '../lib/meal'
 import { stepsOf } from '../lib/steps'
 import {
-  DAY_CUTOFF, DONE, NAME, OPTS, baseSteps, routineDay, routineMinOf, routineNow, shiftOf, stateFor, toDay, todaySteps, type Person, type TodayStep,
+  DAY_CUTOFF, DONE, NAME, OPTS, STEPS, baseSteps, routineDay, routineMinOf, routineNow, shiftOf, stateFor, toDay, todaySteps, type Person, type TodayStep,
 } from '../lib/routine'
 import type { Day, Dish, People } from '../lib/types'
 
@@ -274,7 +274,8 @@ function routineBlock() {
     return `<div class="rt-who"><div class="rt-av rt-${p}">${NAME[p]}</div>
       <div class="rt-doing"><strong>${cur ? esc(cur.what) : '睡覺'}</strong>
         <span class="rt-next">下一件 <b class="${st.next?.moved ? 'rt-red' : ''}">${st.next ? fmtClock(st.next.m) : fmtClock(rtBase()[0].at)}</b>${st.next ? esc(st.next.what) : '起床'}</span>
-        ${d ? `<em class="rt-late">${NAME[p]}今天${d > 0 ? `晚 ${d}` : `早 ${-d}`} 分鐘${by}</em>` : ''}${btns}</div></div>`
+        ${d ? `<em class="rt-late">${NAME[p]}今天${d > 0 ? `晚 ${d}` : `早 ${-d}`} 分鐘${by}</em>` : ''}${btns}
+        ${d ? `<button class="rt-undo" data-rt="undo" data-p="${p}">按錯了，${NAME[p]}改回平常</button>` : ''}</div></div>`
   }
   const mode = ui.rtMode
   const rows: (TodayStep | (ReturnType<typeof rtBase>[number] & { m: number; moved: boolean }))[] =
@@ -349,8 +350,24 @@ function rtClick(ds: DOMStringMap) {
       if (!nx) return
       // 阿寶按「下班了」就是「我下班了」：排今晚的菜
       if (ds.rt === 'done' && nx.key === 'aoff') return offWork(false)
+      const before = store.data.days[rday]
+      const prev = { plan: before?.plan ?? null, plan_by: before?.planBy ?? null }
       rtSetPlan(nx.key, ds.rt === 'later' ? Math.max(nx.m, now) + 15 : now)
-      return toast(ds.rt === 'later' ? `${NAME[p]}後面的事往後 15 分鐘` : `${NAME[p]}：${nx.what}`)
+      // 按錯可以馬上復原
+      return toast(ds.rt === 'later' ? `${NAME[p]}後面的事往後 15 分鐘` : `${NAME[p]}：${nx.what}`, () =>
+        store.run('dp_days', { day: rday, ...prev }),
+      )
+    }
+    case 'undo': {
+      // 這個人今天改過的時間全部拿掉，回到平常
+      const p = ds.p as Person
+      const mine = new Set(STEPS.filter((i) => i.who === p).map((i) => i.key))
+      const left = Object.fromEntries(Object.entries(store.data.days[rday]?.plan ?? {}).filter(([k]) => !mine.has(k)))
+      const has = Object.keys(left).length > 0
+      store.run('dp_days', { day: rday, plan: has ? left : null, plan_by: has ? (store.data.days[rday]?.planBy ?? null) : null })
+      // 阿寶的下班時間來自「我下班了」，一起改回還沒下班
+      if (p === 'a' && store.data.days[taipeiToday()]?.offAt) store.run('dp_days', { day: taipeiToday(), off_at: null, avail_min: null, cooked: false })
+      return toast(`${NAME[p]}今天照平常的時間`)
     }
     case 'edit':
       ui.rtMode = 'today'
@@ -416,14 +433,14 @@ function viewOffGate() {
 // 按了下班之後，在今晚的菜上面說明時間怎麼算的
 function offInfo(row: Day | undefined) {
   if (!row?.offAt) return ''
-  if (row.avail === null) return `<div class="ow-done"><span>今天在家，照平常的時間排</span><button class="link" data-act="reoff">重按下班</button></div>`
+  if (row.avail === null) return `<div class="ow-done"><span>今天在家，照平常的時間排</span><button class="ow-undo" data-act="reoff">按錯了</button></div>`
   const s = store.data.settings
   const off = taipeiMinutes(new Date(row.offAt))
   const limit = limitOf(row.avail)
   return `<div class="ow-done"><div><span>${fmtClock(off)} 下班・${fmtClock(off + s.commute)} 到家・${fmtClock(s.dinnerMin)} 開飯</span>
     <b>${row.avail < limit ? `時間很趕，只排 ${limit} 分鐘內的菜` : `可以煮 ${limit} 分鐘`}</b>
     ${limit < 40 ? '<small>電子鍋煮飯要 40 分鐘左右：早上出門前先預約，或用冷凍白飯。</small>' : ''}</div>
-    <button class="link" data-act="reoff">重按</button></div>`
+    <button class="ow-undo" data-act="reoff">按錯了</button></div>`
 }
 
 // ───── 這週 ─────
@@ -665,6 +682,7 @@ document.addEventListener('click', (e) => {
   if (ds.act === 'reoff') {
     // 重按：回到還沒下班的樣子，按了再重新排
     store.run('dp_days', { day: taipeiToday(), off_at: null, avail_min: null, cooked: false })
+    toast('回到還沒下班，真的下班再按一次')
     return
   }
   if (ds.people) return setSetting({ people: Number(ds.people) as People })
