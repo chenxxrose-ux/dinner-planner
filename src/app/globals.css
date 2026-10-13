@@ -2,8 +2,8 @@
 :root{
   /* 只有淺色：不跟手機一起變深色模式 */
   color-scheme:light;
-  --bg:#FBF6EE; --surface:#FFFFFF; --sunk:#F3ECE1; --ink:#3A2E26; --muted:#85766A; --line:#EADFD0;
-  --accent:#D9692F; --accent-ink:#FFFFFF; --leaf:#5F7F3F; --leaf-soft:#EBF1DF; --warm-soft:#FCE6D6;
+  --bg:#FFF5F6; --surface:#FFFFFF; --sunk:#FBE9EC; --ink:#3B2A2E; --muted:#8F767B; --line:#F3D9DE;
+  --accent:#E0506A; --accent-ink:#FFFFFF; --leaf:#3F8F6E; --leaf-soft:#E2F2EA; --warm-soft:#FDE2E7;
   --display:"Noto Serif TC","Songti TC",serif;
   --body:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;
 }
