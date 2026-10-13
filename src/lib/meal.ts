@@ -268,6 +268,32 @@ const toUtc = (iso: string) => {
   const [y, m, d] = iso.split('-').map(Number)
   return Date.UTC(y, m - 1, d)
 }
+/** 台灣時間的「幾點幾分」，從午夜算起的分鐘 */
+export function taipeiMinutes(now = new Date()) {
+  const [h, m] = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+    .format(now)
+    .split(':')
+    .map(Number)
+  return h * 60 + m
+}
+export const fmtClock = (min: number) => {
+  const m = ((min % 1440) + 1440) % 1440
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
+}
+export const parseClock = (s: string) => {
+  const m = s.match(/^(\d{1,2}):(\d{2})/)
+  return m ? Math.min(1439, Number(m[1]) * 60 + Number(m[2])) : null
+}
+
+// 下班後可以煮多久：想吃飯的時間 - 到家的時間。來不及也至少給 15 分鐘，挑最快的菜。
+export const MIN_COOK = 15
+export function cookWindow(offMin: number, commute: number, dinnerMin: number) {
+  const home = offMin + commute
+  const avail = dinnerMin - home
+  return { home, avail, limit: Math.max(MIN_COOK, avail), rushed: avail < MIN_COOK }
+}
+export const limitOf = (avail: number) => Math.max(MIN_COOK, avail)
+
 export function addDays(iso: string, n: number) {
   return new Date(toUtc(iso) + n * 864e5).toISOString().slice(0, 10)
 }

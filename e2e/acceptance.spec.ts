@@ -1,5 +1,6 @@
 import { test, expect, type Browser, type BrowserContext, type Page } from '@playwright/test'
 import { addDays, taipeiToday } from '../src/lib/meal'
+import { MENU } from '../src/lib/menu'
 
 // 驗收流程：兩位媽媽的手機同時開著，資料即時同步；其中一支離線再連線
 const MOCK = 'http://localhost:54321'
@@ -20,6 +21,8 @@ async function sql<T = Record<string, unknown>>(query: string, params: unknown[]
 async function login(browser: Browser, email: string) {
   const ctx = await browser.newContext()
   const page = await ctx.newPage()
+  // 下班時間固定在今天 17:40（台灣時間）
+  await page.clock.setFixedTime(new Date(`${today}T17:40:00+08:00`))
   await page.goto('/')
   await page.getByLabel('Email').fill(email)
   await page.getByLabel('密碼').fill('test-password')
@@ -27,14 +30,25 @@ async function login(browser: Browser, email: string) {
   return { ctx, page }
 }
 
-const dishNames = (p: Page) => p.locator('.meal .dname strong').allTextContents()
+const dishNames = async (p: Page) => (await p.locator('.meal .dname strong').allTextContents()).map((x) => x.replace('愛吃', ''))
+const minutesOf = (names: string[]) => names.map((n) => MENU.find((d) => d.name === n)!.min)
 
 test.beforeAll(async ({ browser }) => {
   ;({ ctx: aCtx, page: a } = await login(browser, 'mom@test.local'))
   await expect(a.getByRole('heading', { name: '今晚煮什麼' })).toBeVisible()
+  // 還沒按下班：先不排菜，告訴你算出來可以煮多久（預設通勤 30 分、19:00 吃）
+  await expect(a.getByText('下班了嗎？')).toBeVisible()
+  await expect(a.locator('.meal')).toHaveCount(0)
+  await expect(a.locator('.ow-calc')).toContainText('現在 17:40 下班，18:10 到家')
+  await expect(a.locator('.ow-calc')).toContainText('可以煮 50 分鐘')
+  await a.getByRole('button', { name: '我下班了' }).click()
   await expect(a.locator('.meal .dish')).toHaveCount(4)
+  await expect(a.locator('.ow-done')).toContainText('17:40 下班・18:10 到家・19:00 開飯')
+  await expect(a.locator('.ow-done')).toContainText('可以煮 50 分鐘')
+  expect(Math.max(...minutesOf(await dishNames(a)))).toBeLessThanOrEqual(50)
   ;({ ctx: bCtx, page: b } = await login(browser, 'mom2@test.local'))
   await expect(b.locator('.meal .dish')).toHaveCount(4)
+  await expect(b.locator('.ow-done')).toContainText('可以煮 50 分鐘')
 })
 
 test.afterAll(async () => {
@@ -169,4 +183,28 @@ test('自己加一道菜', async () => {
   await expect(a.locator('.row', { hasText: '洋蔥牛肉丼' })).toBeVisible()
   const r = await sql<{ ing: unknown }>(`select ing from public.dp_dishes where name = '洋蔥牛肉丼'`)
   expect(r[0].ing).toEqual([['牛肉片', 300, 'g'], ['洋蔥', 1, '顆']])
+})
+
+test('下班太晚：只排最快的菜；重按、今天在家', async () => {
+  await a.getByRole('button', { name: '今晚' }).click()
+  await b.getByRole('button', { name: '今晚' }).click()
+  await a.locator('.ow-done').getByRole('button', { name: '重按' }).click()
+  await expect(a.getByText('下班了嗎？')).toBeVisible()
+  await expect(b.getByText('下班了嗎？')).toBeVisible() // 另一支手機也回到還沒下班
+  await a.getByLabel('通勤').selectOption('60')
+  await a.getByLabel('想幾點吃').fill('18:30')
+  await expect(a.locator('.ow-calc')).toContainText('18:40 到家')
+  await expect(a.locator('.ow-calc')).toContainText('來不及 18:30 吃，挑 15 分鐘內的菜')
+  const row = await sql<{ commute_min: number; dinner_min: number }>(`select commute_min, dinner_min from public.dp_settings`)
+  expect(row[0]).toEqual({ commute_min: 60, dinner_min: 18 * 60 + 30 })
+  await a.getByRole('button', { name: '我下班了' }).click()
+  await expect(a.locator('.ow-done')).toContainText('時間很趕，只排 15 分鐘內的菜')
+  await expect(a.locator('.ow-done')).toContainText('早上出門前先預約')
+  expect(Math.max(...minutesOf(await dishNames(a)))).toBeLessThanOrEqual(15)
+  await expect.poll(() => dishNames(b)).toEqual(await dishNames(a))
+  await a.locator('.ow-done').getByRole('button', { name: '重按' }).click()
+  await a.getByRole('button', { name: '今天在家，直接排' }).click()
+  await expect(a.locator('.ow-done')).toContainText('今天在家')
+  await expect(a.getByRole('button', { name: '30 分內' })).toBeVisible() // 在家就用平常的時間設定
+  await expect(a.locator('.meal .dish')).toHaveCount(4)
 })

@@ -20,6 +20,10 @@ export interface Settings {
   diet: boolean
   noHot: boolean
   maxMin: 0 | 20 | 30
+  /** 下班到家要幾分鐘 */
+  commute: number
+  /** 想幾點吃飯，從午夜算起的分鐘 */
+  dinnerMin: number
 }
 
 export interface Mark {
@@ -33,4 +37,8 @@ export interface Day {
   dishes: string[] | null
   people: People | null
   cooked: boolean
+  /** 按「我下班了」的時間；在家也會記 */
+  offAt: string | null
+  /** 下班後可以煮的分鐘；null 代表今天在家 */
+  avail: number | null
 }
