@@ -1,17 +1,12 @@
 /* 版面：手機單欄，上方今日標題，中間內容卡，下方固定分頁列 */
 :root{
-  --bg:#F1F4EF; --surface:#FFFFFF; --sunk:#E6ECE5; --ink:#1D2A24; --muted:#5F6E66; --line:#D5DDD4;
-  --accent:#C2452D; --accent-ink:#FFFFFF; --leaf:#2F6B45; --leaf-soft:#DCEBDD; --warm-soft:#F7E3DC;
+  /* 只有淺色：不跟手機一起變深色模式 */
+  color-scheme:light;
+  --bg:#FBF6EE; --surface:#FFFFFF; --sunk:#F3ECE1; --ink:#3A2E26; --muted:#85766A; --line:#EADFD0;
+  --accent:#D9692F; --accent-ink:#FFFFFF; --leaf:#5F7F3F; --leaf-soft:#EBF1DF; --warm-soft:#FCE6D6;
   --display:"Noto Serif TC","Songti TC",serif;
   --body:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;
 }
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
-  --bg:#141A17; --surface:#1D2521; --sunk:#252F2A; --ink:#E7EEE9; --muted:#9DABA3; --line:#33403A;
-  --accent:#E46A4F; --accent-ink:#1A0F0B; --leaf:#7FC296; --leaf-soft:#22382B; --warm-soft:#3A241E; color-scheme:dark}}
-:root[data-theme="dark"]{
-  --bg:#141A17; --surface:#1D2521; --sunk:#252F2A; --ink:#E7EEE9; --muted:#9DABA3; --line:#33403A;
-  --accent:#E46A4F; --accent-ink:#1A0F0B; --leaf:#7FC296; --leaf-soft:#22382B; --warm-soft:#3A241E; color-scheme:dark}
-
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.5;-webkit-text-size-adjust:100%}
 button{font:inherit;color:inherit;cursor:pointer}
