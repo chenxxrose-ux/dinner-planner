@@ -26,6 +26,8 @@ export interface Settings {
   dinnerMin: number
   /** 作息平常的時間 { 項目: 分鐘 }，沒寫的用預設 */
   routine: Record<string, number>
+  /** 吃外面：我們常吃的店、不想吃的 */
+  out: { mine: { name: string; when: 'dinner' | 'late' | 'both' }[]; no: string[] }
 }
 
 export interface Mark {
@@ -51,4 +53,6 @@ export interface Day {
   boxedAt: string | null
   /** 草莓運動前吃了 */
   snackAt: string | null
+  /** 今天吃外面：a 阿寶下班吃什麼、s 草莓運動完買什麼；null 是自己煮 */
+  eatOut: { a: string; s: string } | null
 }
