@@ -23,6 +23,35 @@ const row = (p: Page, who: '阿寶' | '草莓') => p.locator('.rt-who').filter({
 
 test.describe.configure({ mode: 'serial' })
 
+const reset = async () => {
+  for (const sql of ['update public.dp_days set plan = null, plan_by = null, boxed_at = null, snack_at = null, off_at = null, avail_min = null', 'update public.dp_settings set dinner_min = 1230, commute_min = 0']) {
+    await fetch('http://localhost:54321/__test/sql', { method: 'POST', body: JSON.stringify({ sql, params: [] }) })
+  }
+}
+
+test('作息：按錯了可以改回來', async ({ browser }) => {
+  await reset()
+  const { ctx, page: a } = await phone(browser, 'mom@test.local', '19:44', '阿寶')
+  await expect(row(a, '草莓')).toContainText('黃昏市場上工')
+  // 阿寶不小心按到草莓那排的「下班了」
+  await row(a, '草莓').getByRole('button', { name: '下班了' }).click()
+  await expect(row(a, '草莓')).toContainText('草莓今天早')
+  await a.locator('.toast').getByRole('button', { name: '復原' }).click()
+  await expect(row(a, '草莓')).not.toContainText('草莓今天早')
+  await expect(row(a, '草莓')).toContainText('黃昏市場上工')
+  // 再按錯一次，過了幾秒才發現：用「按錯了」改回來
+  await row(a, '草莓').getByRole('button', { name: '下班了' }).click()
+  await row(a, '草莓').getByRole('button', { name: '好了，下一件' }).click()
+  await expect(row(a, '草莓')).toContainText('草莓今天早')
+  await a.screenshot({ path: `${OUT}/8-作息-按錯.png` })
+  await row(a, '草莓').getByRole('button', { name: '按錯了，草莓改回平常' }).click()
+  await expect(row(a, '草莓')).toContainText('黃昏市場上工')
+  await expect(row(a, '草莓')).not.toContainText('今天早')
+  const r = await (await fetch('http://localhost:54321/__test/sql', { method: 'POST', body: JSON.stringify({ sql: "select plan from public.dp_days where plan is not null", params: [] }) })).json()
+  expect(r).toEqual([])
+  await ctx.close()
+})
+
 test('作息：現在、運動晚一點、兩支手機同步、改時間', async ({ browser }) => {
   for (const sql of ['update public.dp_days set plan = null, plan_by = null, boxed_at = null, snack_at = null', 'update public.dp_settings set dinner_min = 1230, commute_min = 0']) {
     await fetch('http://localhost:54321/__test/sql', { method: 'POST', body: JSON.stringify({ sql, params: [] }) })

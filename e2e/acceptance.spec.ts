@@ -185,10 +185,10 @@ test('自己加一道菜', async () => {
   expect(r[0].ing).toEqual([['牛肉片', 300, 'g'], ['洋蔥', 1, '顆']])
 })
 
-test('下班太晚：只排最快的菜；重按、今天在家', async () => {
+test('下班太晚：只排最快的菜；按錯了、今天在家', async () => {
   await a.getByRole('button', { name: '今晚' }).click()
   await b.getByRole('button', { name: '今晚' }).click()
-  await a.locator('.ow-done').getByRole('button', { name: '重按' }).click()
+  await a.locator('.ow-done').getByRole('button', { name: '按錯了' }).click()
   await expect(a.getByText('下班了嗎？')).toBeVisible()
   await expect(b.getByText('下班了嗎？')).toBeVisible() // 另一支手機也回到還沒下班
   await a.getByLabel('通勤').selectOption('60')
@@ -202,7 +202,7 @@ test('下班太晚：只排最快的菜；重按、今天在家', async () => {
   await expect(a.locator('.ow-done')).toContainText('早上出門前先預約')
   expect(Math.max(...minutesOf(await dishNames(a)))).toBeLessThanOrEqual(15)
   await expect.poll(() => dishNames(b)).toEqual(await dishNames(a))
-  await a.locator('.ow-done').getByRole('button', { name: '重按' }).click()
+  await a.locator('.ow-done').getByRole('button', { name: '按錯了' }).click()
   await a.getByRole('button', { name: '今天在家，直接排' }).click()
   await expect(a.locator('.ow-done')).toContainText('今天在家')
   await expect(a.getByRole('button', { name: '30 分內' })).toBeVisible() // 在家就用平常的時間設定
