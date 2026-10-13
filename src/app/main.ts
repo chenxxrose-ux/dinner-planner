@@ -1,0 +1,482 @@
+import './globals.css'
+import { store } from '../features/data/store'
+import {
+  AISLE_NAMES, KIND, SIZES, TOOL, addDays, dailySeed, daysAgo, drawMeal, fmtQty, fmtSauce, isLight, mealName,
+  parseIngInput, rng, sizeLabel, slotsFor, taipeiToday, totals, typeOf, weekday, type Meal, type Pool, type Slot,
+} from '../lib/meal'
+import type { Dish, People } from '../lib/types'
+
+const WD = ['日', '一', '二', '三', '四', '五', '六']
+const esc = (s: unknown) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
+const recipeUrl = (name: string) => 'https://icook.tw/search/' + encodeURIComponent(name) + '/'
+const dateLabel = (iso: string) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}（${WD[weekday(iso)]}）`
+
+// 這支手機自己的畫面狀態（不需要同步）
+type Tab = 'tonight' | 'week' | 'lib' | 'shop'
+const ui = {
+  tab: 'tonight' as Tab,
+  locks: {} as Partial<Record<Slot, boolean>>,
+  libKind: 'main' as Dish['type'],
+  libQ: '',
+}
+
+const app = document.getElementById('app')!
+const tabs = document.getElementById('tabs')!
+const toastEl = document.getElementById('toast')!
+
+// ───── 資料整理 ─────
+function pool(): Pool {
+  const d = store.data
+  const today = taipeiToday()
+  const lastEaten: Record<string, string> = {}
+  for (const day of Object.values(d.days)) {
+    if (!day.dishes || day.day > today || (day.day === today && !day.cooked)) continue
+    for (const n of day.dishes) if (!lastEaten[n] || lastEaten[n] < day.day) lastEaten[n] = day.day
+  }
+  return { dishes: store.dishes, marks: d.marks, lastEaten, today, diet: d.settings.diet }
+}
+const byName = (name: string) => store.dishes.find((d) => d.name === name)
+
+// 今晚的菜：存在 dp_days，兩支手機看到同一組
+function tonight(): { meal: Meal; saved: boolean } {
+  const d = store.data
+  const today = taipeiToday()
+  const s = d.settings
+  const slots = slotsFor(s.people, s.diet)
+  const row = d.days[today]
+  if (row?.dishes && row.people === s.people && row.dishes.length === slots.length) {
+    const meal: Meal = {}
+    slots.forEach((slot, i) => (meal[slot] = row.dishes![i]))
+    return { meal, saved: true }
+  }
+  const p = pool()
+  // 今天還沒排：用日期當種子抽，兩支手機會一樣
+  const meal = drawMeal(p, s.people, rng(dailySeed(today, s.people, { ...s, diet: s.diet }, row?.reroll ?? 0)), {}, s)
+  return { meal, saved: false }
+}
+function saveTonight(meal: Meal, extra: Record<string, unknown> = {}) {
+  const s = store.data.settings
+  const dishes = slotsFor(s.people, s.diet).map((slot) => meal[slot]).filter(Boolean)
+  if (!dishes.length) return
+  store.run('dp_days', { day: taipeiToday(), dishes, people: s.people, ...extra })
+}
+function redraw(extraSeed = '') {
+  const today = taipeiToday()
+  const s = store.data.settings
+  const { meal } = tonight()
+  const fixed: Meal = {}
+  for (const slot of slotsFor(s.people, s.diet)) if (ui.locks[slot] && meal[slot]) fixed[slot] = meal[slot]
+  const reroll = (store.data.days[today]?.reroll ?? 0) + (extraSeed ? 0 : 1)
+  const next = drawMeal(pool(), s.people, rng(dailySeed(today, s.people, s, reroll, extraSeed)), fixed, s)
+  saveTonight(next, extraSeed ? { cooked: false } : { reroll, cooked: false })
+}
+
+// ───── 共用小元件 ─────
+let undoFn: (() => void) | null = null
+let toastTimer: ReturnType<typeof setTimeout> | undefined
+function toast(msg: string, undo?: () => void) {
+  undoFn = undo ?? null
+  toastEl.innerHTML = esc(msg) + (undo ? ' <button class="undo" data-act="undo">復原</button>' : '')
+  toastEl.hidden = false
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => {
+    toastEl.hidden = true
+    undoFn = null
+  }, undo ? 5000 : 2200)
+}
+
+const ICONS: Record<Tab, string> = {
+  tonight: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 13h16a8 8 0 0 1-16 0Z"/><path d="M12 5v3M8.5 6.5 9.5 8.5M15.5 6.5l-1 2"/></svg>',
+  week: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="5" width="16" height="15" rx="2.5"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>',
+  lib: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 4h11a1 1 0 0 1 1 1v15H7a2 2 0 0 1-2-2V5a1 1 0 0 1 1-1Z"/><path d="M5 18a2 2 0 0 1 2-2h11M9 8h6M9 11h4"/></svg>',
+  shop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 8h14l-1.2 11a1 1 0 0 1-1 .9H7.2a1 1 0 0 1-1-.9Z"/><path d="M9 8a3 3 0 0 1 6 0"/></svg>',
+}
+const TABS: [Tab, string][] = [['tonight', '今晚'], ['week', '這週'], ['lib', '菜單庫'], ['shop', '買菜']]
+
+function banners() {
+  const out: string[] = []
+  if (!store.online) out.push(`<div class="banner off" role="status">沒有網路。改的東西先存在這支手機，連上網路會自動同步。</div>`)
+  else if (store.pending) out.push(`<div class="banner off" role="status">同步中…</div>`)
+  if (store.problem) out.push(`<div class="banner bad" role="alert"><span>${esc(store.problem)}</span><button data-act="dismiss">知道了</button></div>`)
+  if (store.loadError) out.push(`<div class="banner bad" role="alert"><span>讀不到最新資料：${esc(store.loadError)}</span><button data-act="retry">再試一次</button></div>`)
+  return out.join('')
+}
+
+function qtyList(food: ReturnType<typeof totals>['food']) {
+  return `<ul class="qty">${food.map((f) => `<li><span>${esc(f.name)}<span class="who">${esc(f.who.join('、'))}</span></span><span class="n">${fmtQty(f.q, f.unit)}</span></li>`).join('')}</ul>`
+}
+
+// ───── 今晚 ─────
+function viewTonight() {
+  const d = store.data
+  const s = d.settings
+  const today = taipeiToday()
+  const n = s.people
+  const slots = slotsFor(n, s.diet)
+  const { meal } = tonight()
+  const ds = slots.map((sl) => meal[sl] && byName(meal[sl]!)).filter(Boolean) as Dish[]
+  const maxMin = ds.length ? Math.max(...ds.map((x) => x.min)) : 0
+  const t = totals(ds.map((x) => ({ d: x, n })), s.diet)
+  const row = d.days[today]
+  const tools: Record<string, number> = {}
+  ds.forEach((x) => (tools[x.tool] = (tools[x.tool] ?? 0) + 1))
+  return `
+  <header><h1>今晚煮什麼</h1><span class="date">${dateLabel(today)}</span></header>
+  ${banners()}
+  <div class="people" role="group" aria-label="幾個人吃">
+    ${SIZES.map((k) => `<button data-people="${k}" aria-pressed="${n === k}"><b>${k} 人</b><small>${sizeLabel(k, s.diet)}</small></button>`).join('')}
+  </div>
+  <section class="filters" aria-label="條件">
+    <div class="frow"><span class="flabel">時間</span><div class="chips">
+      ${([[20, '20 分內'], [30, '30 分內'], [0, '不限']] as const).map(([v, l]) => `<button class="chip" data-time="${v}" aria-pressed="${s.maxMin === v}">${l}</button>`).join('')}</div>
+    </div>
+    <div class="frow"><span class="flabel">口味</span><div class="chips">
+      <button class="chip" data-nohot aria-pressed="${s.noHot}">不要辣</button><button class="chip" data-diet aria-pressed="${s.diet}">草莓減重中</button></div>
+    </div>
+  </section>
+  <section class="meal" aria-label="今晚的菜">
+    <div class="meal-head"><b>${n} 人・${mealName(n, s.diet)}</b><span>約 ${maxMin} 分鐘上桌</span></div>
+    ${slots.map((slot) => {
+      const x = meal[slot] ? byName(meal[slot]!) : undefined
+      const k = typeOf(slot)
+      return `<div class="dish"><div class="kind k-${k}">${KIND[k]}</div>
+        <div class="dname">${x
+          ? `<strong>${esc(x.name)}${d.marks[x.name]?.fav ? '<span class="tag">愛吃</span>' : ''}</strong><small>${TOOL[x.tool]}・${x.min} 分・<a class="rec" href="${recipeUrl(x.name)}" target="_blank" rel="noopener">看做法</a></small>`
+          : '<span class="empty-dish">沒有符合條件的菜，放寬時間試試</span>'}</div>
+        <div class="acts">${x ? `<button class="lock" data-lock="${slot}" aria-pressed="${!!ui.locks[slot]}" aria-label="${ui.locks[slot] ? '取消固定' : '固定這道'}">${ui.locks[slot] ? '已固定' : '固定'}</button><button class="nope" data-nope="${slot}" aria-label="不敢吃${esc(x.name)}，以後不要這道">不敢吃</button>` : ''}</div></div>`
+    }).join('')}
+    <p class="tools">${Object.entries(tools).map(([k, v]) => `${TOOL[k as Dish['tool']]} ${v}`).join('・')}，可以同時開工</p>
+  </section>
+  ${row?.cooked
+    ? `<div class="cooked">✓ 今晚就煮這個，已加進買菜清單</div>`
+    : `<div class="daily"><span>${row?.reroll ? `今天換過 ${row.reroll} 次` : '每天自動抽一組，同一餐不會撞食材'}</span></div>`}
+  ${s.diet ? `<section class="plate" aria-label="草莓的盤子">
+    <div class="plate-fig" aria-hidden="true"><span class="q veg">菜</span><span class="q veg">菜</span><span class="q pro">主菜</span><span class="q carb">飯</span></div>
+    <div class="plate-txt"><b>草莓的盤子：211 餐盤</b>
+      <p>半盤青菜、四分之一主菜、四分之一澱粉。飯用電子鍋煮糙米或五穀米，一餐約半碗。</p>
+      <p>先吃主菜，再吃菜，最後吃飯。下面的味霸、鹽、醬油、糖都已經減半，每道菜用 1 小匙油。味霸本身就很鹹，用了就不要再加鹽。</p>
+    </div>
+  </section>` : ''}
+  <div class="actions">
+    <button class="btn btn-ghost" data-act="shuffle">換一組</button>
+    <button class="btn btn-main" data-act="cook" ${row?.cooked ? 'disabled' : ''}>${row?.cooked ? '已決定' : '就煮這個'}</button>
+  </div>
+  ${ds.length ? `<section class="prep" aria-label="今晚要準備">
+    <h3>到全聯要買<small>${n} 人份</small></h3>
+    ${qtyList(t.food)}
+    <h3>配料<small>${s.diet ? '已減半・' : ''}家裡沒有再買</small></h3>
+    <div class="sauces">${t.sauce.map((x) => `<span class="sauce">${esc(x.name)} ${esc(fmtSauce(x.amt))}</span>`).join('')}</div>
+  </section>` : ''}
+  <div class="foot"><span>${store.syncedAt ? `兩支手機同步・${new Date(store.syncedAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false })} 更新` : ''}</span><button data-act="signout">登出</button></div>`
+}
+
+// ───── 這週 ─────
+const weekDays = () => Array.from({ length: 7 }, (_, i) => addDays(taipeiToday(), i))
+function viewWeek() {
+  const d = store.data
+  const today = taipeiToday()
+  return `
+  <header><h1>這週晚餐</h1><span class="date">${dateLabel(today)} 起</span></header>
+  ${banners()}
+  <div class="sec-title"><h2>接下來 7 天</h2><button class="link" data-act="autofill">空的幫我排（${d.settings.people} 人）</button></div>
+  <section class="week">
+    ${weekDays().map((k, i) => {
+      const p = d.days[k]
+      const names = p?.dishes ? p.dishes.map((x) => '<i>' + esc(x) + '</i>').join('、') : ''
+      return `<div class="day ${i === 0 ? 'today' : ''}"><div class="d"><b>${Number(k.slice(8))}</b><span>${i === 0 ? '今天' : '週' + WD[weekday(k)]}</span></div>
+        <div class="m ${names ? '' : 'none'}">${names ? names + `<small>${p!.people ?? d.settings.people} 人份${i === 0 && !p!.cooked ? '・今晚建議' : ''}</small>` : '還沒決定'}</div>
+        ${names && i > 0 ? `<button class="x" data-clear="${k}" aria-label="清掉${Number(k.slice(8))}號">清掉</button>` : '<span></span>'}</div>`
+    }).join('')}
+  </section>
+  <p class="note">一週內同一道菜不會出現兩次，同一餐不撞食材。家人要來那天，先到「今晚」切成 8 人再排。</p>`
+}
+function autofill() {
+  const d = store.data
+  const s = d.settings
+  const used = new Set<string>()
+  for (const k of weekDays()) d.days[k]?.dishes?.forEach((x) => used.add(x))
+  const { meal, saved } = tonight()
+  if (!saved) {
+    saveTonight(meal)
+    Object.values(meal).forEach((x) => used.add(x!))
+  }
+  const r = rng('week|' + crypto.randomUUID())
+  let c = 0
+  for (const k of weekDays().slice(1)) {
+    if (d.days[k]?.dishes) continue
+    const m = drawMeal(pool(), s.people, r, {}, { maxMin: 0, noHot: s.noHot, exclude: used })
+    const dishes = slotsFor(s.people, s.diet).map((sl) => m[sl]).filter(Boolean) as string[]
+    if (!dishes.length) continue
+    dishes.forEach((x) => used.add(x))
+    store.run('dp_days', { day: k, dishes, people: s.people })
+    c++
+  }
+  toast(c ? `排好 ${c} 天` : '這週都排好了')
+}
+
+// ───── 菜單庫 ─────
+function viewLib() {
+  const d = store.data
+  const q = ui.libQ.trim()
+  const p = pool()
+  const all = store.dishes
+  const list = all
+    .filter((x) => x.type === ui.libKind && (!q || x.name.includes(q) || x.ing.some((i) => i[0].includes(q))))
+    .sort((a, b) => Number(!!d.marks[a.name]?.banned) - Number(!!d.marks[b.name]?.banned) || Number(!!d.marks[b.name]?.fav) - Number(!!d.marks[a.name]?.fav) || a.tool.localeCompare(b.tool) || a.min - b.min)
+  const banned = all.filter((x) => d.marks[x.name]?.banned).length
+  return `
+  <header><h1>菜單庫</h1><span class="date">${all.length} 道</span></header>
+  ${banners()}
+  <label class="search" for="libQ"><input id="libQ" type="search" placeholder="找菜名或食材，例如：雞腿" value="${esc(ui.libQ)}"></label>
+  <div class="seg" role="group" aria-label="種類">
+    ${(Object.entries(KIND) as [Dish['type'], string][]).map(([k, l]) => `<button data-kind="${k}" aria-pressed="${ui.libKind === k}">${l} ${all.filter((x) => x.type === k).length}</button>`).join('')}
+  </div>
+  <p class="sub">按 ♡ 標「愛吃」，抽到的機會變 3 倍。按「不敢吃」以後就不會再抽到，放在最下面，可以恢復。${banned ? `目前 ${banned} 道不吃。` : ''}</p>
+  <section class="list">
+    ${list.length ? list.map((x) => {
+      const m = d.marks[x.name]
+      const a = daysAgo(p, x.name)
+      return `<div class="row ${m?.banned ? 'banned' : ''}"><div class="t"><b>${esc(x.name)}</b>${m?.banned ? '<span class="tag">不吃</span>' : ''}${x.hot ? '<span class="tag">辣</span>' : ''}${isLight(x) ? '<span class="tag lite">輕盈</span>' : ''}<small>${TOOL[x.tool]}・${x.min} 分・${a === null ? '還沒煮過' : a === 0 ? '今天煮過' : a + ' 天前煮過'}</small></div>
+      <div class="acts">${m?.banned
+        ? `<button class="nope back" data-unban="${esc(x.name)}">恢復</button>`
+        : `<button class="heart" data-fav="${esc(x.name)}" aria-pressed="${!!m?.fav}" aria-label="${m?.fav ? '取消愛吃' : '標成愛吃'}">${m?.fav ? '♥' : '♡'}</button><button class="nope" data-ban="${esc(x.name)}" aria-label="不敢吃${esc(x.name)}">不敢吃</button>`}</div></div>`
+    }).join('') : '<div class="blank">找不到，換個字試試，或從下面加一道</div>'}
+  </section>
+  <form class="add" id="addForm">
+    <b>加一道我們家的菜</b>
+    <label for="fName">菜名<input id="fName" required maxlength="20" placeholder="例如：洋蔥牛肉丼"></label>
+    <div class="two">
+      <label for="fType">種類<select id="fType">${(Object.entries(KIND) as [string, string][]).map(([k, l]) => `<option value="${k}" ${k === ui.libKind ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label for="fTool">用什麼煮<select id="fTool">${Object.entries(TOOL).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
+    </div>
+    <label for="fMin">要幾分鐘<input id="fMin" type="number" inputmode="numeric" min="1" max="240" value="20"></label>
+    <label for="fIng">全聯要買的（3 人份）<input id="fIng" placeholder="牛肉片 300g 洋蔥 1顆"></label>
+    <label for="fSauce">配料<input id="fSauce" placeholder="醬油 米酒 味霸"></label>
+    <button class="btn btn-main" type="submit">加入</button>
+  </form>`
+}
+
+// ───── 買菜 ─────
+function viewShop() {
+  const d = store.data
+  const entries: { d: Dish; n: number }[] = []
+  for (const k of weekDays()) {
+    const p = d.days[k]
+    if (!p?.dishes) continue
+    for (const name of p.dishes) {
+      const x = byName(name)
+      if (x) entries.push({ d: x, n: p.people ?? d.settings.people })
+    }
+  }
+  const head = `<header><h1>買菜清單</h1><span class="date">${entries.length ? `${entries.length} 道菜的量` : '這週排的菜'}</span></header>${banners()}`
+  if (!entries.length) return `${head}<div class="blank">這週還沒排菜。<br>到「這週」按「空的幫我排」，清單會自己算好份量。</div>`
+  const t = totals(entries, d.settings.diet)
+  const row = (key: string, label: string, who: string, n: string) => {
+    const done = !!d.shop[key]
+    return `<label class="${done ? 'done' : ''}"><input type="checkbox" data-shop="${esc(key)}" ${done ? 'checked' : ''}><span>${esc(label)}<small>${esc(who)}</small></span><span class="n">${n}</span></label>`
+  }
+  return `${head}
+  ${AISLE_NAMES.map(([a, g]) => {
+    const fs = t.food.filter((f) => f.aisle === a)
+    return fs.length ? `<div class="grp">${g}</div><section class="shop">${fs.map((f) => row(`f:${f.name}|${f.unit}`, f.name, f.who.join('、'), fmtQty(f.q, f.unit))).join('')}</section>` : ''
+  }).join('')}
+  <div class="grp">配料・家裡有就勾掉</div>
+  <section class="shop">${t.sauce.map((x) => row('s:' + x.name, x.name, x.who.join('、'), '')).join('')}</section>
+  <p class="note">照全聯逛的順序排。份量是今天起 7 天排的菜加總，肉類挑最接近的盒裝重量就好。兩支手機的勾勾會同步。</p>`
+}
+
+// ───── 登入與其他狀態 ─────
+function viewLogin(err = '') {
+  return `<form class="login" id="loginForm">
+    <div><h1>今晚煮什麼</h1><div class="note" style="margin-top:8px">用「今日事」或「叫蛋記帳」的帳號登入，登入一次這支手機就會記得。</div></div>
+    ${store.loadError ? `<div class="banner bad">${esc(store.loadError)}</div>` : ''}
+    <div class="field"><label for="email">Email</label><input class="input" id="email" type="email" autocomplete="username" inputmode="email"></div>
+    <div class="field"><label for="pw">密碼</label><input class="input" id="pw" type="password" autocomplete="current-password"></div>
+    <div class="err" role="alert" id="loginErr">${esc(err)}</div>
+    <button class="btn btn-main" id="loginBtn">登入</button>
+  </form>`
+}
+
+function render() {
+  const keepFocus = document.activeElement instanceof HTMLInputElement && document.activeElement.id === 'libQ' ? document.activeElement.selectionStart : null
+  if (store.phase === 'loading') {
+    tabs.hidden = true
+    app.innerHTML = `<header><h1>今晚煮什麼</h1></header><div class="blank" role="status">載入中…</div>`
+    return
+  }
+  if (store.phase === 'login') {
+    tabs.hidden = true
+    if (!document.getElementById('loginForm')) app.innerHTML = viewLogin()
+    return
+  }
+  if (store.phase === 'not-member') {
+    tabs.hidden = true
+    app.innerHTML = `<header><h1>今晚煮什麼</h1></header><div class="blank">這個帳號還沒開通，請跟家裡的大人說。</div><div class="foot"><span></span><button data-act="signout">換帳號登入</button></div>`
+    return
+  }
+  tabs.hidden = false
+  app.innerHTML = { tonight: viewTonight, week: viewWeek, lib: viewLib, shop: viewShop }[ui.tab]()
+  tabs.innerHTML = TABS.map(([k, l]) => `<button data-tab="${k}" ${ui.tab === k ? 'aria-current="page"' : ''}>${ICONS[k]}<span>${l}</span></button>`).join('')
+  if (keepFocus !== null) {
+    const i = document.getElementById('libQ') as HTMLInputElement | null
+    i?.focus()
+    i?.setSelectionRange(keepFocus, keepFocus)
+  }
+}
+
+// ───── 操作 ─────
+function setSetting(row: Record<string, unknown>) {
+  store.run('dp_settings', { id: 1, ...row })
+  ui.locks = {}
+  // 條件改了，今晚的菜照新條件重抽（已經決定煮的就不動）
+  if (!store.data.days[taipeiToday()]?.cooked) {
+    const { meal } = tonight()
+    saveTonight(meal)
+  }
+}
+
+document.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest('button')
+  if (!b) return
+  const ds = b.dataset
+  const data = store.data
+  if (ds.tab) {
+    ui.tab = ds.tab as Tab
+    render()
+    window.scrollTo(0, 0)
+    return
+  }
+  if (ds.act === 'undo') {
+    const f = undoFn
+    undoFn = null
+    toastEl.hidden = true
+    f?.()
+    return
+  }
+  if (ds.people) return setSetting({ people: Number(ds.people) as People })
+  if (ds.time !== undefined) return setSetting({ max_min: Number(ds.time) })
+  if ('nohot' in ds) return setSetting({ no_hot: !data.settings.noHot })
+  if ('diet' in ds) {
+    setSetting({ diet: !data.settings.diet })
+    return toast(store.data.settings.diet ? '減重模式：只抽少油少鹽的菜' : '已關掉減重模式')
+  }
+  if (ds.lock) {
+    const slot = ds.lock as Slot
+    ui.locks[slot] = !ui.locks[slot]
+    // 固定的菜要存起來，另一支手機才看得到同一組
+    if (!tonight().saved) saveTonight(tonight().meal)
+    return render()
+  }
+  if (ds.nope) {
+    const slot = ds.nope as Slot
+    const { meal } = tonight()
+    const name = meal[slot]
+    if (!name) return
+    const prev = { ...meal }
+    ui.locks[slot] = false
+    store.run('dp_marks', { dish: name, banned: true })
+    const fixed: Meal = { ...meal }
+    delete fixed[slot]
+    const s = store.data.settings
+    const next = drawMeal(pool(), s.people, rng(taipeiToday() + '|nope|' + name), fixed, s)
+    saveTonight(next, { cooked: false })
+    toast(`以後不會再出現「${name}」`, () => {
+      store.run('dp_marks', { dish: name, banned: false })
+      saveTonight(prev)
+    })
+    return
+  }
+  if (ds.ban) {
+    const name = ds.ban
+    store.run('dp_marks', { dish: name, banned: true, fav: false })
+    if (Object.values(tonight().meal).includes(name) && !data.days[taipeiToday()]?.cooked) redraw('|ban|' + name)
+    return toast(`以後不會再出現「${name}」`, () => store.run('dp_marks', { dish: name, banned: false }))
+  }
+  if (ds.unban) {
+    store.run('dp_marks', { dish: ds.unban, banned: false })
+    return toast(`「${ds.unban}」恢復了`)
+  }
+  if (ds.fav) return store.run('dp_marks', { dish: ds.fav, fav: !data.marks[ds.fav]?.fav })
+  if (ds.kind) {
+    ui.libKind = ds.kind as Dish['type']
+    return render()
+  }
+  if (ds.clear) return store.run('dp_days', { day: ds.clear, dishes: null, people: null })
+  switch (ds.act) {
+    case 'shuffle':
+      return redraw()
+    case 'cook': {
+      const { meal } = tonight()
+      saveTonight(meal, { cooked: true })
+      return toast('記下來了，已加進今天和買菜清單')
+    }
+    case 'autofill':
+      return autofill()
+    case 'dismiss':
+      return store.dismissProblem()
+    case 'retry':
+      return void store.refresh()
+    case 'signout':
+      return void store.signOut()
+  }
+})
+
+document.addEventListener('input', (e) => {
+  const t = e.target as HTMLInputElement
+  if (t.id === 'libQ') {
+    ui.libQ = t.value
+    render()
+  }
+})
+
+document.addEventListener('change', (e) => {
+  const t = e.target as HTMLInputElement
+  if (t.dataset.shop !== undefined) store.run('dp_shop', { week: store.data.week, item: t.dataset.shop, done: t.checked })
+})
+
+document.addEventListener('submit', async (e) => {
+  const f = e.target as HTMLFormElement
+  e.preventDefault()
+  if (f.id === 'loginForm') {
+    const email = (document.getElementById('email') as HTMLInputElement).value.trim()
+    const pw = (document.getElementById('pw') as HTMLInputElement).value
+    const errEl = document.getElementById('loginErr')!
+    const btn = document.getElementById('loginBtn') as HTMLButtonElement
+    if (!email || !pw) return void (errEl.textContent = '請填 Email 和密碼')
+    if (!navigator.onLine) return void (errEl.textContent = '現在沒有網路，第一次登入需要網路')
+    btn.disabled = true
+    btn.textContent = '登入中…'
+    const err = await store.signIn(email, pw)
+    btn.disabled = false
+    btn.textContent = '登入'
+    errEl.textContent = err
+    return
+  }
+  if (f.id === 'addForm') {
+    const val = (id: string) => (document.getElementById(id) as HTMLInputElement).value.trim()
+    const name = val('fName')
+    if (!name) return
+    if (store.dishes.some((x) => x.name === name)) return toast(`「${name}」已經在菜單庫裡了`)
+    const type = val('fType') as Dish['type']
+    store.run('dp_dishes', {
+      name,
+      type,
+      tool: val('fTool'),
+      minutes: Math.max(1, Math.min(240, parseInt(val('fMin')) || 20)),
+      ing: parseIngInput(val('fIng')),
+      sauce: val('fSauce').split(/[\s、,，]+/).filter(Boolean).map((x) => [x, '適量']),
+    })
+    ui.libKind = type
+    ui.libQ = ''
+    toast(`加入「${name}」`)
+  }
+})
+
+store.subscribe(render)
+render()
+void store.start()
+
+// 網頁存在手機裡，沒有網路也打得開
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  void navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`)
+}
