@@ -20,7 +20,10 @@ const ui = {
   libQ: '',
   /** 菜單庫裡展開做法的菜，重畫畫面時保持打開 */
   open: new Set<string>(),
+  /** 加菜表單打到一半的內容：另一支手機改了東西、畫面重畫時不會被清掉 */
+  draft: {} as Record<string, string>,
 }
+const draftVal = (id: string, dflt = '') => esc(ui.draft[id] ?? dflt)
 
 const app = document.getElementById('app')!
 const tabs = document.getElementById('tabs')!
@@ -268,14 +271,14 @@ function viewLib() {
   </section>
   <form class="add" id="addForm">
     <b>加一道我們家的菜</b>
-    <label for="fName">菜名<input id="fName" required maxlength="20" placeholder="例如：洋蔥牛肉丼"></label>
+    <label for="fName">菜名<input id="fName" required maxlength="20" placeholder="例如：洋蔥牛肉丼" value="${draftVal('fName')}"></label>
     <div class="two">
-      <label for="fType">種類<select id="fType">${(Object.entries(KIND) as [string, string][]).map(([k, l]) => `<option value="${k}" ${k === ui.libKind ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-      <label for="fTool">用什麼煮<select id="fTool">${Object.entries(TOOL).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
+      <label for="fType">種類<select id="fType">${(Object.entries(KIND) as [string, string][]).map(([k, l]) => `<option value="${k}" ${k === (ui.draft.fType ?? ui.libKind) ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label for="fTool">用什麼煮<select id="fTool">${Object.entries(TOOL).map(([k, l]) => `<option value="${k}" ${k === ui.draft.fTool ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     </div>
-    <label for="fMin">要幾分鐘<input id="fMin" type="number" inputmode="numeric" min="1" max="240" value="20"></label>
-    <label for="fIng">全聯要買的（3 人份）<input id="fIng" placeholder="牛肉片 300g 洋蔥 1顆"></label>
-    <label for="fSauce">配料<input id="fSauce" placeholder="醬油 米酒 味霸"></label>
+    <label for="fMin">要幾分鐘<input id="fMin" type="number" inputmode="numeric" min="1" max="240" value="${draftVal('fMin', '20')}"></label>
+    <label for="fIng">全聯要買的（3 人份）<input id="fIng" placeholder="牛肉片 300g 洋蔥 1顆" value="${draftVal('fIng')}"></label>
+    <label for="fSauce">配料<input id="fSauce" placeholder="醬油 米酒 味霸" value="${draftVal('fSauce')}"></label>
     <button class="btn btn-main" type="submit">加入</button>
   </form>`
 }
@@ -322,7 +325,10 @@ function viewLogin(err = '') {
 }
 
 function render() {
-  const keepFocus = document.activeElement instanceof HTMLInputElement && document.activeElement.id === 'libQ' ? document.activeElement.selectionStart : null
+  // 重畫前記住正在打字的欄位，重畫後游標放回原處
+  const act = document.activeElement
+  const focusId = act instanceof HTMLInputElement && act.id ? act.id : null
+  const keepFocus = focusId ? (act as HTMLInputElement).selectionStart : null
   if (store.phase === 'loading') {
     tabs.hidden = true
     app.innerHTML = `<header><h1>今晚煮什麼</h1></header><div class="blank" role="status">載入中…</div>`
@@ -341,10 +347,14 @@ function render() {
   tabs.hidden = false
   app.innerHTML = { tonight: viewTonight, week: viewWeek, lib: viewLib, shop: viewShop }[ui.tab]()
   tabs.innerHTML = TABS.map(([k, l]) => `<button data-tab="${k}" ${ui.tab === k ? 'aria-current="page"' : ''}>${ICONS[k]}<span>${l}</span></button>`).join('')
-  if (keepFocus !== null) {
-    const i = document.getElementById('libQ') as HTMLInputElement | null
+  if (focusId) {
+    const i = document.getElementById(focusId) as HTMLInputElement | null
     i?.focus()
-    i?.setSelectionRange(keepFocus, keepFocus)
+    try {
+      if (keepFocus !== null) i?.setSelectionRange(keepFocus, keepFocus)
+    } catch {
+      /* 數字欄位不能設游標位置 */
+    }
   }
 }
 
@@ -462,11 +472,12 @@ document.addEventListener('input', (e) => {
   if (t.id === 'libQ') {
     ui.libQ = t.value
     render()
-  }
+  } else if (t.closest?.('#addForm')) ui.draft[t.id] = t.value
 })
 
 document.addEventListener('change', (e) => {
   const t = e.target as HTMLInputElement
+  if (t.closest?.('#addForm')) ui.draft[t.id] = t.value
   if (t.dataset.shop !== undefined) store.run('dp_shop', { week: store.data.week, item: t.dataset.shop, done: t.checked })
 })
 
@@ -504,6 +515,7 @@ document.addEventListener('submit', async (e) => {
     })
     ui.libKind = type
     ui.libQ = ''
+    ui.draft = {}
     toast(`加入「${name}」`)
   }
 })

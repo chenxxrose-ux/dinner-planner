@@ -150,6 +150,19 @@ test('自己加一道菜', async () => {
   await b.getByLabel('菜名').fill('洋蔥牛肉丼')
   await b.locator('#fType').selectOption('main')
   await b.getByLabel('全聯要買的（3 人份）').fill('牛肉片 300g 洋蔥 1顆')
+  // 打到一半，另一支手機改了東西：畫面重畫，打好的字不能不見
+  const favs = () => sql(`select 1 from public.dp_marks where fav`)
+  const before = (await favs()).length
+  await a.getByRole('button', { name: /^湯/ }).click()
+  await b.getByRole('button', { name: /^湯/ }).click()
+  const soup = a.locator('.row:not(.banned)').nth(1)
+  const soupName = (await soup.locator('b').textContent())!
+  await soup.getByRole('button', { name: '標成愛吃' }).click()
+  await expect.poll(async () => (await favs()).length).toBe(before + 1)
+  await expect(b.locator('.row', { hasText: soupName }).getByRole('button', { name: '取消愛吃' })).toBeVisible()
+  await expect(b.getByLabel('菜名')).toHaveValue('洋蔥牛肉丼')
+  await expect(b.locator('#fType')).toHaveValue('main')
+  await expect(b.getByLabel('全聯要買的（3 人份）')).toHaveValue('牛肉片 300g 洋蔥 1顆')
   await b.getByRole('button', { name: '加入' }).click()
   await expect(b.locator('.row', { hasText: '洋蔥牛肉丼' })).toBeVisible()
   await a.getByRole('button', { name: /^主菜/ }).click()
