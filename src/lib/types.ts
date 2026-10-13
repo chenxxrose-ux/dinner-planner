@@ -24,6 +24,8 @@ export interface Settings {
   commute: number
   /** 想幾點吃飯，從午夜算起的分鐘 */
   dinnerMin: number
+  /** 作息平常的時間 { 項目: 分鐘 }，沒寫的用預設 */
+  routine: Record<string, number>
 }
 
 export interface Mark {
@@ -41,4 +43,12 @@ export interface Day {
   offAt: string | null
   /** 下班後可以煮的分鐘；null 代表今天在家 */
   avail: number | null
+  /** 作息今天臨時改的時間 */
+  plan: Record<string, number> | null
+  /** 誰改的：a 阿寶、s 草莓 */
+  planBy: 'a' | 's' | null
+  /** 草莓那份裝好放冰箱的時間 */
+  boxedAt: string | null
+  /** 草莓運動前吃了 */
+  snackAt: string | null
 }
