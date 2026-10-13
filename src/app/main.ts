@@ -2,13 +2,13 @@ import './globals.css'
 import { store } from '../features/data/store'
 import {
   AISLE_NAMES, KIND, SIZES, TOOL, addDays, dailySeed, daysAgo, drawMeal, fmtQty, fmtSauce, isLight, mealName,
-  parseIngInput, rng, sizeLabel, slotsFor, taipeiToday, totals, typeOf, weekday, type Meal, type Pool, type Slot,
+  parseIngInput, rng, roundQty, sauceAmt, sizeLabel, slotsFor, taipeiToday, totals, typeOf, weekday, type Meal, type Pool, type Slot,
 } from '../lib/meal'
+import { stepsOf } from '../lib/steps'
 import type { Dish, People } from '../lib/types'
 
 const WD = ['日', '一', '二', '三', '四', '五', '六']
 const esc = (s: unknown) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
-const recipeUrl = (name: string) => 'https://icook.tw/search/' + encodeURIComponent(name) + '/'
 const dateLabel = (iso: string) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}（${WD[weekday(iso)]}）`
 
 // 這支手機自己的畫面狀態（不需要同步）
@@ -18,7 +18,12 @@ const ui = {
   locks: {} as Partial<Record<Slot, boolean>>,
   libKind: 'main' as Dish['type'],
   libQ: '',
+  /** 菜單庫裡展開做法的菜，重畫畫面時保持打開 */
+  open: new Set<string>(),
+  /** 加菜表單打到一半的內容：另一支手機改了東西、畫面重畫時不會被清掉 */
+  draft: {} as Record<string, string>,
 }
+const draftVal = (id: string, dflt = '') => esc(ui.draft[id] ?? dflt)
 
 const app = document.getElementById('app')!
 const tabs = document.getElementById('tabs')!
@@ -141,7 +146,7 @@ function viewTonight() {
       const k = typeOf(slot)
       return `<div class="dish"><div class="kind k-${k}">${KIND[k]}</div>
         <div class="dname">${x
-          ? `<strong>${esc(x.name)}${d.marks[x.name]?.fav ? '<span class="tag">愛吃</span>' : ''}</strong><small>${TOOL[x.tool]}・${x.min} 分・<a class="rec" href="${recipeUrl(x.name)}" target="_blank" rel="noopener">看做法</a></small>`
+          ? `<strong>${esc(x.name)}${d.marks[x.name]?.fav ? '<span class="tag">愛吃</span>' : ''}</strong><small>${TOOL[x.tool]}・${x.min} 分・<button class="rec" data-how="${esc(x.name)}">做法 ↓</button></small>`
           : '<span class="empty-dish">沒有符合條件的菜，放寬時間試試</span>'}</div>
         <div class="acts">${x ? `<button class="lock" data-lock="${slot}" aria-pressed="${!!ui.locks[slot]}" aria-label="${ui.locks[slot] ? '取消固定' : '固定這道'}">${ui.locks[slot] ? '已固定' : '固定'}</button><button class="nope" data-nope="${slot}" aria-label="不敢吃${esc(x.name)}，以後不要這道">不敢吃</button>` : ''}</div></div>`
     }).join('')}
@@ -167,7 +172,28 @@ function viewTonight() {
     <h3>配料<small>${s.diet ? '已減半・' : ''}家裡沒有再買</small></h3>
     <div class="sauces">${t.sauce.map((x) => `<span class="sauce">${esc(x.name)} ${esc(fmtSauce(x.amt))}</span>`).join('')}</div>
   </section>` : ''}
+  ${ds.length ? howSection(ds, n, s.diet) : ''}
   <div class="foot"><span>${store.syncedAt ? `兩支手機同步・${new Date(store.syncedAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false })} 更新` : ''}</span><button data-act="signout">登出</button></div>`
+}
+
+// 做法：花最久的先開工；每道菜自己的份量（換人數、減重都已算好）
+function howSteps(x: Dish) {
+  const steps = stepsOf(x.name)
+  return steps.length
+    ? `<ol class="steps">${steps.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>`
+    : '<p class="sub">自己加的菜，還沒寫做法。</p>'
+}
+function howSection(ds: Dish[], n: People, diet: boolean) {
+  const order = [...ds].sort((a, b) => b.min - a.min)
+  return `<section class="how" aria-label="做法">
+    <h3>做法<small>花最久的先開工</small></h3>
+    <p class="how-tip">先洗米放電子鍋按下去${diet ? '（糙米或五穀米）' : ''}，再照下面的順序做。${diet ? '每道菜的油都只用 1 小匙，下面的調味已經減半。' : ''}</p>
+    ${order.map((x) => `<article class="how-dish" id="how-${esc(x.name)}">
+      <div class="how-head"><span class="kind k-${x.type}">${KIND[x.type]}</span><b>${esc(x.name)}</b><small>${TOOL[x.tool]}・${x.min} 分</small></div>
+      <p class="how-ing">${x.ing.map(([nm, q, u]) => `${esc(nm)} ${fmtQty(roundQty((q * n) / 3, u), u)}`).join('、')}${x.sauce.length ? `<br><span>${x.sauce.map(([nm, a]) => `${esc(nm)} ${esc(fmtSauce([sauceAmt(nm, a, n, diet)]))}`).join('、')}</span>` : ''}</p>
+      ${howSteps(x)}
+    </article>`).join('')}
+  </section>`
 }
 
 // ───── 這週 ─────
@@ -239,19 +265,20 @@ function viewLib() {
       return `<div class="row ${m?.banned ? 'banned' : ''}"><div class="t"><b>${esc(x.name)}</b>${m?.banned ? '<span class="tag">不吃</span>' : ''}${x.hot ? '<span class="tag">辣</span>' : ''}${isLight(x) ? '<span class="tag lite">輕盈</span>' : ''}<small>${TOOL[x.tool]}・${x.min} 分・${a === null ? '還沒煮過' : a === 0 ? '今天煮過' : a + ' 天前煮過'}</small></div>
       <div class="acts">${m?.banned
         ? `<button class="nope back" data-unban="${esc(x.name)}">恢復</button>`
-        : `<button class="heart" data-fav="${esc(x.name)}" aria-pressed="${!!m?.fav}" aria-label="${m?.fav ? '取消愛吃' : '標成愛吃'}">${m?.fav ? '♥' : '♡'}</button><button class="nope" data-ban="${esc(x.name)}" aria-label="不敢吃${esc(x.name)}">不敢吃</button>`}</div></div>`
+        : `<button class="heart" data-fav="${esc(x.name)}" aria-pressed="${!!m?.fav}" aria-label="${m?.fav ? '取消愛吃' : '標成愛吃'}">${m?.fav ? '♥' : '♡'}</button><button class="nope" data-ban="${esc(x.name)}" aria-label="不敢吃${esc(x.name)}">不敢吃</button>`}</div>
+      <details class="lib-how"${ui.open.has(x.name) ? ' open' : ''} data-name="${esc(x.name)}"><summary>做法</summary>${howSteps(x)}</details></div>`
     }).join('') : '<div class="blank">找不到，換個字試試，或從下面加一道</div>'}
   </section>
   <form class="add" id="addForm">
     <b>加一道我們家的菜</b>
-    <label for="fName">菜名<input id="fName" required maxlength="20" placeholder="例如：洋蔥牛肉丼"></label>
+    <label for="fName">菜名<input id="fName" required maxlength="20" placeholder="例如：洋蔥牛肉丼" value="${draftVal('fName')}"></label>
     <div class="two">
-      <label for="fType">種類<select id="fType">${(Object.entries(KIND) as [string, string][]).map(([k, l]) => `<option value="${k}" ${k === ui.libKind ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-      <label for="fTool">用什麼煮<select id="fTool">${Object.entries(TOOL).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
+      <label for="fType">種類<select id="fType">${(Object.entries(KIND) as [string, string][]).map(([k, l]) => `<option value="${k}" ${k === (ui.draft.fType ?? ui.libKind) ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label for="fTool">用什麼煮<select id="fTool">${Object.entries(TOOL).map(([k, l]) => `<option value="${k}" ${k === ui.draft.fTool ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     </div>
-    <label for="fMin">要幾分鐘<input id="fMin" type="number" inputmode="numeric" min="1" max="240" value="20"></label>
-    <label for="fIng">全聯要買的（3 人份）<input id="fIng" placeholder="牛肉片 300g 洋蔥 1顆"></label>
-    <label for="fSauce">配料<input id="fSauce" placeholder="醬油 米酒 味霸"></label>
+    <label for="fMin">要幾分鐘<input id="fMin" type="number" inputmode="numeric" min="1" max="240" value="${draftVal('fMin', '20')}"></label>
+    <label for="fIng">全聯要買的（3 人份）<input id="fIng" placeholder="牛肉片 300g 洋蔥 1顆" value="${draftVal('fIng')}"></label>
+    <label for="fSauce">配料<input id="fSauce" placeholder="醬油 米酒 味霸" value="${draftVal('fSauce')}"></label>
     <button class="btn btn-main" type="submit">加入</button>
   </form>`
 }
@@ -298,7 +325,10 @@ function viewLogin(err = '') {
 }
 
 function render() {
-  const keepFocus = document.activeElement instanceof HTMLInputElement && document.activeElement.id === 'libQ' ? document.activeElement.selectionStart : null
+  // 重畫前記住正在打字的欄位，重畫後游標放回原處
+  const act = document.activeElement
+  const focusId = act instanceof HTMLInputElement && act.id ? act.id : null
+  const keepFocus = focusId ? (act as HTMLInputElement).selectionStart : null
   if (store.phase === 'loading') {
     tabs.hidden = true
     app.innerHTML = `<header><h1>今晚煮什麼</h1></header><div class="blank" role="status">載入中…</div>`
@@ -317,10 +347,14 @@ function render() {
   tabs.hidden = false
   app.innerHTML = { tonight: viewTonight, week: viewWeek, lib: viewLib, shop: viewShop }[ui.tab]()
   tabs.innerHTML = TABS.map(([k, l]) => `<button data-tab="${k}" ${ui.tab === k ? 'aria-current="page"' : ''}>${ICONS[k]}<span>${l}</span></button>`).join('')
-  if (keepFocus !== null) {
-    const i = document.getElementById('libQ') as HTMLInputElement | null
+  if (focusId) {
+    const i = document.getElementById(focusId) as HTMLInputElement | null
     i?.focus()
-    i?.setSelectionRange(keepFocus, keepFocus)
+    try {
+      if (keepFocus !== null) i?.setSelectionRange(keepFocus, keepFocus)
+    } catch {
+      /* 數字欄位不能設游標位置 */
+    }
   }
 }
 
@@ -334,6 +368,14 @@ function setSetting(row: Record<string, unknown>) {
     saveTonight(meal)
   }
 }
+
+document.addEventListener('toggle', (e) => {
+  const el = e.target as HTMLDetailsElement
+  if (!el.classList?.contains('lib-how')) return
+  const name = el.dataset.name!
+  if (el.open) ui.open.add(name)
+  else ui.open.delete(name)
+}, true)
 
 document.addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest('button')
@@ -351,6 +393,10 @@ document.addEventListener('click', (e) => {
     undoFn = null
     toastEl.hidden = true
     f?.()
+    return
+  }
+  if (ds.how) {
+    document.getElementById('how-' + ds.how)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     return
   }
   if (ds.people) return setSetting({ people: Number(ds.people) as People })
@@ -426,11 +472,12 @@ document.addEventListener('input', (e) => {
   if (t.id === 'libQ') {
     ui.libQ = t.value
     render()
-  }
+  } else if (t.closest?.('#addForm')) ui.draft[t.id] = t.value
 })
 
 document.addEventListener('change', (e) => {
   const t = e.target as HTMLInputElement
+  if (t.closest?.('#addForm')) ui.draft[t.id] = t.value
   if (t.dataset.shop !== undefined) store.run('dp_shop', { week: store.data.week, item: t.dataset.shop, done: t.checked })
 })
 
@@ -468,6 +515,7 @@ document.addEventListener('submit', async (e) => {
     })
     ui.libKind = type
     ui.libQ = ''
+    ui.draft = {}
     toast(`加入「${name}」`)
   }
 })

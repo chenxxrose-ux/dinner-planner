@@ -13,8 +13,17 @@ test('每個畫面', async ({ browser }) => {
   await p.getByRole('button', { name: '登入' }).click()
   await expect(p.locator('.meal .dish').first()).toBeVisible()
   await p.screenshot({ path: `${OUT}/1-今晚.png`, fullPage: true })
+  // 按「做法 ↓」跳到那道菜的步驟
+  await p.locator('.meal .dish').first().getByRole('button', { name: '做法 ↓' }).click()
+  const first = (await p.locator('.meal .dname strong').first().textContent())!.replace('愛吃', '')
+  await expect(p.locator(`[id="how-${first}"] .steps li`).first()).toBeInViewport()
+  await p.screenshot({ path: `${OUT}/1b-做法.png` })
   for (const [tab, name] of [['這週', '2-這週'], ['菜單庫', '3-菜單庫'], ['買菜', '4-買菜']]) {
     await p.getByRole('button', { name: tab, exact: true }).click()
+    if (tab === '菜單庫') {
+      await p.locator('.lib-how summary').first().click()
+      await expect(p.locator('.lib-how .steps').first()).toBeVisible()
+    }
     await p.screenshot({ path: `${OUT}/${name}.png`, fullPage: true })
   }
   const w = await p.evaluate(() => document.documentElement.scrollWidth)

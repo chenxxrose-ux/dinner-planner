@@ -5,6 +5,7 @@ import {
   sauceAmt, slotsFor, taipeiToday, totals, weekStart, type Pool,
 } from './meal'
 import type { People } from './types'
+import { STEPS, stepsOf } from './steps'
 
 const pool = (over: Partial<Pool> = {}): Pool => ({ dishes: MENU, marks: {}, lastEaten: {}, today: '2026-10-13', diet: false, ...over })
 
@@ -123,5 +124,16 @@ describe('日期與輸入', () => {
   it('自己加菜的材料', () => {
     expect(parseIngInput('牛肉片 300g 洋蔥 1顆')).toEqual([['牛肉片', 300, 'g'], ['洋蔥', 1, '顆']])
     expect(parseIngInput('雞腿2支、蔥')).toEqual([['雞腿', 2, '支'], ['蔥', 1, '份']])
+  })
+})
+
+describe('做法', () => {
+  it('每道內建菜都有做法，而且不寫死份量', () => {
+    for (const d of MENU) {
+      const s = stepsOf(d.name)
+      expect(s.length, d.name).toBeGreaterThanOrEqual(2)
+      for (const t of s) expect(t, d.name).not.toMatch(/味精/)
+    }
+    expect(Object.keys(STEPS).filter((k) => !MENU.some((d) => d.name === k))).toEqual([])
   })
 })

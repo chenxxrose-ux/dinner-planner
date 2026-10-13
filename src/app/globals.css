@@ -131,7 +131,7 @@ nav.tabs button[aria-current="page"]{color:var(--accent);font-weight:700}
 .day .m small{display:block;font-size:12px;color:var(--muted)}
 .grp{font-size:13px;color:var(--muted);font-weight:600;letter-spacing:.06em;margin:4px 0 -8px}
 .shop .n{font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:600;text-align:right}
-.rec{color:var(--accent);text-decoration:none;font-weight:600}
+.rec{color:var(--accent);text-decoration:none;font-weight:600;border:0;background:none;padding:0;font:inherit;font-weight:600;cursor:pointer}
 .tools{margin:6px 0 0;padding-top:10px;border-top:1px solid var(--line);font-size:13px;color:var(--muted)}
 .heart{border:0;background:none;font-size:22px;line-height:1;width:44px;height:44px;color:var(--accent)}
 .search input{font:inherit;font-size:16px;width:100%;border:1px solid var(--line);border-radius:12px;padding:10px 14px;background:var(--surface);color:var(--ink)}
@@ -172,3 +172,25 @@ a{color:inherit}
 .cooked{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--leaf);font-weight:600}
 .foot{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:13px;color:var(--muted)}
 .foot button{border:0;background:none;color:var(--muted);text-decoration:underline;padding:8px 0}
+
+/* 做法 */
+.how{display:flex;flex-direction:column;gap:12px}
+.how>h3{display:flex;align-items:baseline;justify-content:space-between;font-size:17px;margin:4px 0 0}
+.how>h3 small{font-size:13px;color:var(--muted);font-weight:400}
+.how-tip{margin:0;font-size:14px;color:var(--leaf);background:var(--leaf-soft);border-radius:12px;padding:10px 12px}
+.how-dish{background:var(--surface);border-radius:16px;padding:14px 16px;box-shadow:0 1px 0 var(--line);scroll-margin-top:12px}
+.how-head{display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:10px;align-items:center}
+.how-head b{font-size:17px;font-family:var(--display,inherit)}
+.how-head small{font-size:13px;color:var(--muted);white-space:nowrap}
+.how-ing{margin:10px 0 0;font-size:14px;line-height:1.6;color:var(--ink);background:var(--sunk);border-radius:10px;padding:8px 12px}
+.how-ing span{color:var(--muted)}
+.steps{margin:12px 0 0;padding:0;list-style:none;counter-reset:s;display:flex;flex-direction:column;gap:10px}
+.steps li{counter-increment:s;display:grid;grid-template-columns:24px 1fr;gap:10px;font-size:15px;line-height:1.6}
+.steps li::before{content:counter(s);width:24px;height:24px;border-radius:50%;background:var(--leaf-soft);color:var(--leaf);font-size:13px;font-weight:700;display:grid;place-items:center;margin-top:1px}
+.lib-how{grid-column:1/-1}
+.lib-how summary{font-size:14px;color:var(--accent);font-weight:600;cursor:pointer;list-style:none;padding:2px 0}
+.lib-how summary::-webkit-details-marker{display:none}
+.lib-how summary::after{content:' ↓'}
+.lib-how[open] summary::after{content:' ↑'}
+.lib-how .steps{margin-top:8px}
+.how-head .kind{height:28px;border-radius:8px;font-size:13px}
