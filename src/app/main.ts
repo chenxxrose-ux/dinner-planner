@@ -24,6 +24,8 @@ const ui = {
   open: new Set<string>(),
   /** 加菜表單打到一半的內容：另一支手機改了東西、畫面重畫時不會被清掉 */
   draft: {} as Record<string, string>,
+  /** 下班前預覽：要買什麼有沒有打開 */
+  pvOpen: false,
   /** 吃外面：常吃的店有沒有打開 */
   eoOpen: false,
 }
@@ -234,6 +236,7 @@ function viewOffGate() {
   return `
  <header><h1>今晚煮什麼</h1><span class="date">${dateLabel(taipeiToday())}</span></header>
   ${banners()}
+  ${previewBlock()}
   <section class="offwork" aria-label="下班">
     <b class="ow-title">下班了嗎？</b>
     <p class="ow-sub">按下去，照你到家的時間排今晚的菜。</p>
@@ -251,6 +254,21 @@ function viewOffGate() {
   </section>
   ${peopleRow()}
   <div class="foot"><span></span><button data-act="signout">登出</button></div>`
+}
+// 還沒下班先看今晚的菜：要先買菜就按「就煮這組」，下班後菜不會再換
+function previewBlock() {
+  const s = store.data.settings
+  const { meal } = tonight()
+  const ds = slotsFor(s.people, s.diet).map((sl) => meal[sl] && byName(meal[sl]!)).filter(Boolean) as Dish[]
+  if (!ds.length) return ''
+  const t = totals(ds.map((x) => ({ d: x, n: s.people })), s.diet)
+  return `<section class="pv" aria-label="今晚預覽">
+    <div class="pv-head"><b>先看今晚的菜</b><span>${s.people} 人・約 ${Math.max(...ds.map((x) => x.min))} 分鐘</span></div>
+    <ul class="pv-list">${ds.map((x) => `<li><span class="kind k-${x.type}">${KIND[x.type]}</span><strong>${esc(x.name)}</strong><small>${TOOL[x.tool]}・${x.min} 分</small></li>`).join('')}</ul>
+    <details class="pv-buy" ${ui.pvOpen ? 'open' : ''}><summary>到全聯要買（${t.food.length} 樣）</summary>${qtyList(t.food)}</details>
+    <p class="pv-tip">要先去買菜就按「就煮這組」，下班後菜就不會換。</p>
+    <div class="actions"><button class="btn btn-ghost" data-act="shuffle">換一組</button><button class="btn btn-main" data-act="cook">就煮這組</button></div>
+  </section>`
 }
 // 按了下班之後，在今晚的菜上面說明時間怎麼算的
 function offInfo(row: Day | undefined) {
@@ -539,7 +557,9 @@ function offWork(home: boolean) {
   const o = { maxMin: avail === null ? s.maxMin : limitOf(avail), noHot: s.noHot, diet: s.diet }
   const slots = slotsFor(s.people, s.diet)
   // 這週已經排好的菜來得及就照排，來不及才重抽
-  const planned = row?.dishes && row.people === s.people && row.dishes.length === slots.length ? row.dishes : null
+  // 下班前預覽看到的那組（還沒存）也算排好的
+  const shown = slots.map((sl) => tonight().meal[sl]).filter(Boolean) as string[]
+  const planned = row?.dishes && row.people === s.people && row.dishes.length === slots.length ? row.dishes : shown.length === slots.length ? shown : null
   const fits = planned && planned.every((n) => (byName(n)?.min ?? 999) <= (o.maxMin || 999))
   let dishes = fits ? planned : null
   if (!dishes) {
@@ -564,6 +584,10 @@ function setSetting(row: Record<string, unknown>) {
 
 document.addEventListener('toggle', (e) => {
   const el = e.target as HTMLDetailsElement
+  if (el.classList?.contains('pv-buy')) {
+    ui.pvOpen = el.open
+    return
+  }
   if (el.classList?.contains('eo-mine')) {
     ui.eoOpen = el.open
     return
