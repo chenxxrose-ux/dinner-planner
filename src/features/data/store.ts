@@ -267,10 +267,17 @@ class Store {
     this.channel = null
   }
 
+  /** 存成功幾次；refresh 用來判斷讀到的資料是不是比剛存的舊 */
+  private saved = 0
+
   async refresh() {
     if (!this.uid || !navigator.onLine) return this.emit()
     try {
-      this.server = await fetchAll()
+      // 讀取途中剛好存了東西：這份讀到的是舊的，丟掉再讀一次，免得剛存的被蓋回去
+      const v = this.saved
+      const fresh = await fetchAll()
+      if (v !== this.saved) return void (await this.refresh())
+      this.server = fresh
       this.syncedAt = new Date().toISOString()
       this.loadError = ''
       write(CACHE, { userId: this.uid, data: this.server, syncedAt: this.syncedAt })
@@ -304,6 +311,7 @@ class Store {
         } else {
           // 先套到手機裡的資料，畫面不會閃回去；即時同步再拿最新的
           this.server = apply(this.server, op)
+          this.saved++
         }
         this.queue = this.queue.slice(1)
         write(QUEUE, this.queue)
