@@ -206,7 +206,7 @@ export function fmtSauce(list: Amount[]) {
 const AISLE: [number, RegExp][] = [
   [0, /雞(?!蛋)|棒棒腿|豬|排骨|五花|牛肉/],
   [1, /魚|鮭|鯖|鱸|虱目|鯛|蝦(?!米)|蛤蜊|中卷/],
-  [3, /蛋|豆腐|鮮奶|毛豆/],
+  [3, /蛋|豆腐|豆干|鮮奶|毛豆/],
   [4, /罐頭|乾|紫菜|蝦米|冬粉|花生|菜脯|木耳|貢丸|魚丸|餛飩/],
 ]
 export const AISLE_NAMES: [number, string][] = [
