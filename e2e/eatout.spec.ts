@@ -8,11 +8,11 @@ const OUT = 'test-results/screens'
 const sql = async (q: string) =>
   (await fetch('http://localhost:54321/__test/sql', { method: 'POST', body: JSON.stringify({ sql: q, params: [] }) })).json()
 const reset = async () => {
-  await sql('update public.dp_days set eat_out = null, off_at = null, avail_min = null, cooked = false, plan = null, plan_by = null, boxed_at = null, snack_at = null')
+  await sql('update public.dp_days set eat_out = null, off_at = null, avail_min = null, cooked = false')
   await sql(`update public.dp_settings set out_prefs = '{"mine":[],"no":[]}', dinner_min = 1230, commute_min = 0, diet = true`)
 }
 
-async function phone(browser: Browser, email: string, at: string, who: '阿寶' | '草莓') {
+async function phone(browser: Browser, email: string, at: string) {
   const ctx = await browser.newContext()
   const page = await ctx.newPage()
   await page.clock.install({ time: new Date(at) })
@@ -20,23 +20,23 @@ async function phone(browser: Browser, email: string, at: string, who: '阿寶' 
   await page.getByLabel('Email').fill(email)
   await page.getByLabel('密碼').fill('test-password')
   await page.getByRole('button', { name: '登入' }).click()
-  await page.locator('.rt-me').getByRole('button', { name: who }).click()
+  await expect(page.locator('#app header')).toBeVisible()
   return { ctx, page }
 }
 
 test.describe.configure({ mode: 'serial' })
 test.afterAll(reset)
 
-test('吃外面：各抽一個、換一個、不想吃、加常吃的店、半夜提醒草莓買什麼', async ({ browser }) => {
+test('吃外面：各抽一個、換一個、不想吃、加常吃的店、半夜草莓看得到要買什麼', async ({ browser }) => {
   await reset()
-  const { ctx, page: a } = await phone(browser, 'mom@test.local', `${today}T20:05:00+08:00`, '阿寶')
+  const { ctx, page: a } = await phone(browser, 'mom@test.local', `${today}T20:05:00+08:00`)
   await expect(a.getByText('下班了嗎？')).toBeVisible()
   await a.getByRole('button', { name: '今天吃外面' }).click()
   await expect(a.getByRole('heading', { name: '今晚吃外面' })).toBeVisible()
   const cards = a.locator('.eo-card')
   await expect(cards).toHaveCount(2)
-  await expect(cards.nth(0)).toContainText('20:00 下班先吃')
-  await expect(cards.nth(1)).toContainText('00:00 運動完去買・減重點法')
+  await expect(cards.nth(0)).toContainText('下班先吃')
+  await expect(cards.nth(1)).toContainText('運動完去買・減重點法')
   const aName = (await cards.nth(0).locator('.eo-name').textContent())!
   const sName = (await cards.nth(1).locator('.eo-name').textContent())!
   expect(aName).not.toBe(sName)
@@ -67,10 +67,9 @@ test('吃外面：各抽一個、換一個、不想吃、加常吃的店、半�
   expect(row.prefs.mine).toEqual([{ name: '巷口鍋燒意麵', when: 'late' }])
   expect(row.prefs.no).toEqual([a2])
 
-  // 草莓的手機：半夜運動完，提醒去買什麼，不會叫她去開冰箱
-  const { ctx: bCtx, page: b } = await phone(browser, 'mom2@test.local', `${addDays(today, 1)}T00:05:00+08:00`, '草莓')
-  await expect(b.locator('.rt-nudge')).toContainText(`運動完去買：${row.eat_out.s}`)
-  await expect(b.locator('.rt-nudge')).not.toContainText('冰箱')
+  // 草莓的手機：半夜運動完，打開還是看得到要買什麼
+  const { ctx: bCtx, page: b } = await phone(browser, 'mom2@test.local', `${addDays(today, 1)}T00:05:00+08:00`)
+  await expect(b.locator('.eo-card').nth(1).locator('.eo-name')).toHaveText(row.eat_out.s)
   await expect(b.getByRole('heading', { name: '今晚吃外面' })).toBeVisible()
   await b.screenshot({ path: `${OUT}/9c-半夜去買.png`, fullPage: true })
 

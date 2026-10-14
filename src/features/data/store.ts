@@ -47,7 +47,7 @@ const write = (k: string, v: unknown) => {
 }
 
 export const emptyData = (): Data => ({
-  settings: { people: 3, diet: true, noHot: true, maxMin: 30, commute: 30, dinnerMin: 19 * 60, routine: {}, out: { mine: [], no: [] } },
+  settings: { people: 3, diet: true, noHot: true, maxMin: 30, commute: 30, dinnerMin: 19 * 60, out: { mine: [], no: [] } },
   marks: {},
   custom: [],
   days: {},
@@ -67,7 +67,6 @@ function apply(d: Data, op: Op): Data {
       if ('max_min' in r) s.maxMin = r.max_min as Settings['maxMin']
       if ('commute_min' in r) s.commute = r.commute_min as number
       if ('dinner_min' in r) s.dinnerMin = r.dinner_min as number
-      if ('routine' in r) s.routine = r.routine as Record<string, number>
       if ('out_prefs' in r) s.out = r.out_prefs as Settings['out']
       return { ...d, settings: s }
     }
@@ -83,7 +82,7 @@ function apply(d: Data, op: Op): Data {
       return { ...d, custom: [...d.custom, rowToDish(r)] }
     case 'dp_days': {
       const day = r.day as string
-      const cur: Day = d.days[day] ?? { day, reroll: 0, dishes: null, people: null, cooked: false, offAt: null, avail: null, plan: null, planBy: null, boxedAt: null, snackAt: null, eatOut: null }
+      const cur: Day = d.days[day] ?? { day, reroll: 0, dishes: null, people: null, cooked: false, offAt: null, avail: null, eatOut: null }
       const next = { ...cur }
       if ('reroll' in r) next.reroll = r.reroll as number
       if ('dishes' in r) next.dishes = r.dishes as string[] | null
@@ -91,10 +90,6 @@ function apply(d: Data, op: Op): Data {
       if ('cooked' in r) next.cooked = r.cooked as boolean
       if ('off_at' in r) next.offAt = r.off_at as string | null
       if ('avail_min' in r) next.avail = r.avail_min as number | null
-      if ('plan' in r) next.plan = r.plan as Day['plan']
-      if ('plan_by' in r) next.planBy = r.plan_by as Day['planBy']
-      if ('boxed_at' in r) next.boxedAt = r.boxed_at as string | null
-      if ('snack_at' in r) next.snackAt = r.snack_at as string | null
       if ('eat_out' in r) next.eatOut = r.eat_out as Day['eatOut']
       return { ...d, days: { ...d.days, [day]: next } }
     }
@@ -117,13 +112,9 @@ function rowToDish(r: Record<string, unknown>): Dish {
   }
 }
 
-type DayRow = Omit<Day, 'offAt' | 'avail' | 'plan' | 'planBy' | 'boxedAt' | 'snackAt' | 'eatOut'> & {
+type DayRow = Omit<Day, 'offAt' | 'avail' | 'eatOut'> & {
   off_at: string | null
   avail_min: number | null
-  plan: Day['plan']
-  plan_by: Day['planBy']
-  boxed_at: string | null
-  snack_at: string | null
   eat_out: Day['eatOut']
 }
 
@@ -131,25 +122,25 @@ async function fetchAll(): Promise<Data> {
   const today = taipeiToday()
   const week = weekStart(today)
   const r = await Promise.all([
-    supabase.from('dp_settings').select('people,diet,no_hot,max_min,commute_min,dinner_min,routine,out_prefs').eq('id', 1).maybeSingle(),
+    supabase.from('dp_settings').select('people,diet,no_hot,max_min,commute_min,dinner_min,out_prefs').eq('id', 1).maybeSingle(),
     supabase.from('dp_marks').select('dish,fav,banned'),
     supabase.from('dp_dishes').select('name,type,minutes,tool,ing,sauce').order('created_at'),
-    supabase.from('dp_days').select('day,reroll,dishes,people,cooked,off_at,avail_min,plan,plan_by,boxed_at,snack_at,eat_out').gte('day', addDays(today, -60)),
+    supabase.from('dp_days').select('day,reroll,dishes,people,cooked,off_at,avail_min,eat_out').gte('day', addDays(today, -60)),
     supabase.from('dp_shop').select('item,done').eq('week', week),
   ])
   for (const x of r) if (x.error) throw x.error
   const [s, marks, dishes, days, shop] = r
-  const st = s.data as { people: People; diet: boolean; no_hot: boolean; max_min: Settings['maxMin']; commute_min: number; dinner_min: number; routine: Record<string, number> | null; out_prefs: Settings['out'] | null } | null
+  const st = s.data as { people: People; diet: boolean; no_hot: boolean; max_min: Settings['maxMin']; commute_min: number; dinner_min: number; out_prefs: Settings['out'] | null } | null
   return {
     settings: st
-      ? { people: st.people, diet: st.diet, noHot: st.no_hot, maxMin: st.max_min, commute: st.commute_min ?? 30, dinnerMin: st.dinner_min ?? 19 * 60, routine: st.routine ?? {}, out: { mine: st.out_prefs?.mine ?? [], no: st.out_prefs?.no ?? [] } }
+      ? { people: st.people, diet: st.diet, noHot: st.no_hot, maxMin: st.max_min, commute: st.commute_min ?? 30, dinnerMin: st.dinner_min ?? 19 * 60, out: { mine: st.out_prefs?.mine ?? [], no: st.out_prefs?.no ?? [] } }
       : emptyData().settings,
     marks: Object.fromEntries(((marks.data ?? []) as { dish: string; fav: boolean; banned: boolean }[]).map((m) => [m.dish, { fav: m.fav, banned: m.banned }])),
     custom: ((dishes.data ?? []) as Record<string, unknown>[]).map(rowToDish),
     days: Object.fromEntries(
-      ((days.data ?? []) as DayRow[]).map(({ off_at, avail_min, plan, plan_by, boxed_at, snack_at, eat_out, ...x }) => [
+      ((days.data ?? []) as DayRow[]).map(({ off_at, avail_min, eat_out, ...x }) => [
         x.day,
-        { ...x, people: x.people ?? null, offAt: off_at ?? null, avail: avail_min ?? null, plan: plan ?? null, planBy: plan_by ?? null, boxedAt: boxed_at ?? null, snackAt: snack_at ?? null, eatOut: eat_out ?? null },
+        { ...x, people: x.people ?? null, offAt: off_at ?? null, avail: avail_min ?? null, eatOut: eat_out ?? null },
       ]),
     ),
     shop: Object.fromEntries(((shop.data ?? []) as { item: string; done: boolean }[]).map((x) => [x.item, x.done])),

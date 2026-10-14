@@ -323,3 +323,11 @@ export function parseIngInput(txt: string): [string, number, string][] {
   }
   return out
 }
+
+/** 凌晨 5 點前還算前一天的晚上（草莓運動完半夜才吃） */
+export const DAY_CUTOFF = 5 * 60
+/** 晚餐的「今天」：凌晨 5 點前還算昨天 */
+export function nightDay(now = new Date()) {
+  const t = taipeiToday(now)
+  return taipeiMinutes(now) < DAY_CUTOFF ? addDays(t, -1) : t
+}
