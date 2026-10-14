@@ -121,7 +121,8 @@ nav.tabs button[aria-current="page"]{color:var(--accent);font-weight:700}
 .cost b{font-size:16px;color:var(--ink)}
 .cost small{font-size:12px;line-height:1.5;color:var(--muted)}
 .pv-buy .cost{background:transparent;padding:10px 0 0;border-top:1px solid var(--line);border-radius:0}
-.qty li>span:first-child{min-width:0}
+.miss{flex:none;align-self:center;height:36px;padding:0 10px;border:1px solid var(--line);border-radius:10px;background:transparent;color:var(--muted);font-size:12px;white-space:nowrap}
+.qty li>span:first-child{min-width:0;flex:1}
 .qty .n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:600;flex:none}
 .qty .who{display:block;font-size:12px;color:var(--muted);font-weight:400}
 .sauces{display:flex;flex-wrap:wrap;gap:6px}

@@ -1,7 +1,7 @@
 import './globals.css'
 import { store } from '../features/data/store'
 import {
-  AISLE_NAMES, KIND, SIZES, TOOL, addDays, cookWindow, dailySeed, daysAgo, drawMeal, fmtClock, fmtQty, fmtSauce, isLight, limitOf, mealName,
+  AISLE_NAMES, KIND, SIZES, TOOL, addDays, cookWindow, dailySeed, daysAgo, drawMeal, fmtClock, forgotSwap, fmtQty, fmtSauce, isLight, limitOf, mealName,
   parseClock, taipeiMinutes, DAY_CUTOFF, nightDay,
   parseIngInput, rng, roundQty, sauceAmt, sizeLabel, slotsFor, taipeiToday, totals, typeOf, weekday, type Meal, type Pool, type Slot,
 } from '../lib/meal'
@@ -132,9 +132,10 @@ function banners() {
   return out.join('')
 }
 
-function qtyList(food: ReturnType<typeof totals>['food']) {
+function qtyList(food: ReturnType<typeof totals>['food'], miss = false) {
   const c = costText(food)
-  return `<ul class="qty">${food.map((f) => `<li><span>${esc(f.name)}<span class="who">${esc(f.who.join('、'))}</span></span><span class="n">${fmtQty(f.q, f.unit)}</span></li>`).join('')}</ul>
+  const btn = (name: string) => (miss ? `<button class="miss" data-miss="${esc(name)}" aria-label="沒買到${esc(name)}，換掉用到它的菜">沒買到</button>` : '')
+  return `<ul class="qty">${food.map((f) => `<li><span>${esc(f.name)}<span class="who">${esc(f.who.join('、'))}</span></span><span class="n">${fmtQty(f.q, f.unit)}</span>${btn(f.name)}</li>`).join('')}</ul>
   ${c ? `<p class="cost"><b>這餐材料${c}</b><small>照全聯一般價估的，用多少算多少；醬料沒算，買整包會多一點。</small></p>` : ''}`
 }
 
@@ -196,7 +197,7 @@ function viewTonight() {
   </div>
   ${ds.length ? `<section class="prep" aria-label="今晚要準備">
     <h3>到全聯要買<small>${n} 人份</small></h3>
-    ${qtyList(t.food)}
+    ${qtyList(t.food, true)}
     <h3>配料<small>${s.diet ? '已減半・' : ''}家裡沒有再買</small></h3>
     <div class="sauces">${t.sauce.map((x) => `<span class="sauce">${esc(x.name)} ${esc(fmtSauce(x.amt))}</span>`).join('')}</div>
   </section>` : ''}
@@ -647,6 +648,16 @@ document.addEventListener('click', (e) => {
   if ('diet' in ds) {
     setSetting({ diet: !data.settings.diet })
     return toast(store.data.settings.diet ? '減重模式：只抽少油少鹽的菜' : '已關掉減重模式')
+  }
+  if (ds.miss) {
+    // 沒買到：用到這樣材料的菜換掉，優先換成用已經買的材料就能做的
+    const { meal } = tonight()
+    const prev = { ...meal }
+    const s = store.data.settings
+    const { meal: next, changed } = forgotSwap(pool(), s.people, meal, ds.miss, drawOpts(), rng(`${taipeiToday()}|miss|${ds.miss}|${Date.now()}`))
+    if (!changed.length) return toast(`找不到不用${ds.miss}的菜，那道不加${ds.miss}也可以`)
+    saveTonight(next)
+    return toast(`沒買到${ds.miss}：${changed.map(([a, b]) => `「${a}」換成「${b}」`).join('、')}`, () => saveTonight(prev))
   }
   if (ds.swap) {
     // 換一道：只換這一道，其他不動；這道以後還是會出現
