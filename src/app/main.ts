@@ -259,12 +259,13 @@ function viewOffGate() {
 function previewBlock() {
   const s = store.data.settings
   const { meal } = tonight()
-  const ds = slotsFor(s.people, s.diet).map((sl) => meal[sl] && byName(meal[sl]!)).filter(Boolean) as Dish[]
+  const rows = slotsFor(s.people, s.diet).map((sl) => [sl, meal[sl] && byName(meal[sl]!)] as const).filter((r) => r[1]) as [Slot, Dish][]
+  const ds = rows.map((r) => r[1])
   if (!ds.length) return ''
   const t = totals(ds.map((x) => ({ d: x, n: s.people })), s.diet)
   return `<section class="pv" aria-label="今晚預覽">
     <div class="pv-head"><b>先看今晚的菜</b><span>${s.people} 人・約 ${Math.max(...ds.map((x) => x.min))} 分鐘</span></div>
-    <ul class="pv-list">${ds.map((x) => `<li><span class="kind k-${x.type}">${KIND[x.type]}</span><strong>${esc(x.name)}</strong><small>${TOOL[x.tool]}・${x.min} 分</small></li>`).join('')}</ul>
+    <ul class="pv-list">${rows.map(([sl, x]) => `<li><span class="kind k-${x.type}">${KIND[x.type]}</span><span class="pv-name"><strong>${esc(x.name)}</strong><small>${TOOL[x.tool]}・${x.min} 分</small></span><button class="nope" data-nope="${sl}" aria-label="不敢吃${esc(x.name)}，以後不要這道">不敢吃</button></li>`).join('')}</ul>
     <details class="pv-buy" ${ui.pvOpen ? 'open' : ''}><summary>到全聯要買（${t.food.length} 樣）</summary>${qtyList(t.food)}</details>
     <p class="pv-tip">要先去買菜就按「就煮這組」，下班後菜就不會換。</p>
     <div class="actions"><button class="btn btn-ghost" data-act="shuffle">換一組</button><button class="btn btn-main" data-act="cook">就煮這組</button></div>

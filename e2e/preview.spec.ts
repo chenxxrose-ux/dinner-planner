@@ -26,6 +26,13 @@ test('下班前預覽今晚的菜，按「就煮這組」就固定', async ({ br
   await p.screenshot({ path: `${OUT}/0c-下班前預覽.png`, fullPage: true })
   const w = await p.evaluate(() => document.documentElement.scrollWidth)
   expect(w).toBeLessThanOrEqual(393)
+  // 不敢吃：預覽裡也可以按，那道換掉
+  const gone = first[0]
+  await pv.locator('.pv-list li').first().getByRole('button', { name: /^不敢吃/ }).click()
+  await expect(p.locator('.toast')).toContainText(`以後不會再出現「${gone}」`)
+  await expect(pv.locator('.pv-list strong').first()).not.toHaveText(gone)
+  await p.locator('.toast').getByRole('button', { name: '復原' }).click()
+  await expect(pv.locator('.pv-list strong').first()).toHaveText(gone)
   // 換一組：預覽跟著換
   await pv.getByRole('button', { name: '換一組' }).click()
   await expect.poll(async () => (await pv.locator('.pv-list strong').allTextContents()).join()).not.toBe(first.join())
