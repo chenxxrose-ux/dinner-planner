@@ -6,6 +6,7 @@ import {
   parseIngInput, rng, roundQty, sauceAmt, sizeLabel, slotsFor, taipeiToday, totals, typeOf, weekday, type Meal, type Pool, type Slot,
 } from '../lib/meal'
 import { stepsOf } from '../lib/steps'
+import { costText } from '../lib/price'
 import { findOut, mapUrl, pickOut, type When } from '../lib/eatout'
 import type { Day, Dish, People } from '../lib/types'
 
@@ -132,7 +133,9 @@ function banners() {
 }
 
 function qtyList(food: ReturnType<typeof totals>['food']) {
-  return `<ul class="qty">${food.map((f) => `<li><span>${esc(f.name)}<span class="who">${esc(f.who.join('、'))}</span></span><span class="n">${fmtQty(f.q, f.unit)}</span></li>`).join('')}</ul>`
+  const c = costText(food)
+  return `<ul class="qty">${food.map((f) => `<li><span>${esc(f.name)}<span class="who">${esc(f.who.join('、'))}</span></span><span class="n">${fmtQty(f.q, f.unit)}</span></li>`).join('')}</ul>
+  ${c ? `<p class="cost"><b>這餐材料${c}</b><small>照全聯一般價估的，用多少算多少；醬料沒算，買整包會多一點。</small></p>` : ''}`
 }
 
 // ───── 今晚 ─────
@@ -266,7 +269,7 @@ function previewBlock() {
   return `<section class="pv" aria-label="今晚預覽">
     <div class="pv-head"><b>先看今晚的菜</b><span>${s.people} 人・約 ${Math.max(...ds.map((x) => x.min))} 分鐘</span></div>
     <ul class="pv-list">${rows.map(([sl, x]) => `<li><span class="kind k-${x.type}">${KIND[x.type]}</span><span class="pv-name"><strong>${esc(x.name)}</strong><small>${TOOL[x.tool]}・${x.min} 分</small></span><span class="pv-acts"><button class="lock" data-swap="${sl}" aria-label="換掉${esc(x.name)}，只換這道">換一道</button><button class="nope" data-nope="${sl}" aria-label="不敢吃${esc(x.name)}，以後不要這道">不敢吃</button></span></li>`).join('')}</ul>
-    <details class="pv-buy" ${ui.pvOpen ? 'open' : ''}><summary>到全聯要買（${t.food.length} 樣）</summary>${qtyList(t.food)}</details>
+    <details class="pv-buy" ${ui.pvOpen ? 'open' : ''}><summary>到全聯要買（${t.food.length} 樣${costText(t.food) ? `・${costText(t.food)}` : ''}）</summary>${qtyList(t.food)}</details>
     <p class="pv-tip">要先去買菜就按「就煮這組」，下班後菜就不會換。</p>
     <div class="actions"><button class="btn btn-ghost" data-act="shuffle">換一組</button><button class="btn btn-main" data-act="cook">就煮這組</button></div>
   </section>`
@@ -498,6 +501,7 @@ function viewShop() {
   }).join('')}
   <div class="grp">配料・家裡有就勾掉</div>
   <section class="shop">${t.sauce.map((x) => row('s:' + x.name, x.name, x.who.join('、'), '')).join('')}</section>
+  ${costText(t.food) ? `<p class="cost"><b>材料${costText(t.food)}</b><small>照全聯一般價估的；醬料沒算。</small></p>` : ''}
   <p class="note">照全聯逛的順序排。份量是今天起 7 天排的菜加總，肉類挑最接近的盒裝重量就好。兩支手機的勾勾會同步。</p>`
 }
 
