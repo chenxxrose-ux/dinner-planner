@@ -254,8 +254,9 @@ a.btn-main{color:var(--accent-ink)}
 .pv-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
 .pv-list li{display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:10px;align-items:center;padding:6px 0}
 .pv-list .kind{width:44px;height:28px;border-radius:8px;font-size:13px}
-.pv-list strong{font-size:16px;min-width:0;overflow-wrap:anywhere}
-.pv-list small{font-size:13px;color:var(--muted);white-space:nowrap}
+.pv-name{display:flex;flex-direction:column;min-width:0}
+.pv-list strong{font-size:16px;overflow-wrap:anywhere}
+.pv-list small{font-size:13px;color:var(--muted)}
 .pv-buy{background:var(--sunk);border-radius:12px;padding:0 12px}
 .pv-buy summary{list-style:none;cursor:pointer;padding:10px 0;font-size:15px;font-weight:700;color:var(--accent);display:flex;justify-content:space-between}
 .pv-buy summary::-webkit-details-marker{display:none}
