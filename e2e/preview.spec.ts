@@ -23,6 +23,9 @@ test('下班前預覽今晚的菜，按「就煮這組」就固定', async ({ br
   // 要買什麼：展開就看得到
   await pv.locator('.pv-buy summary').click()
   await expect(pv.locator('.qty li').first()).toBeVisible()
+  // 估算花多少錢：標題和清單下面都有
+  await expect(pv.locator('.pv-buy summary')).toContainText(/約 \$\d/)
+  await expect(pv.locator('.cost b')).toContainText(/這餐材料約 \$\d/)
   await p.screenshot({ path: `${OUT}/0c-下班前預覽.png`, fullPage: true })
   const w = await p.evaluate(() => document.documentElement.scrollWidth)
   expect(w).toBeLessThanOrEqual(393)

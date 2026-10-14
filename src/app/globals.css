@@ -117,6 +117,10 @@ nav.tabs button[aria-current="page"]{color:var(--accent);font-weight:700}
 .qty{display:flex;flex-direction:column;margin:0;padding:0;list-style:none}
 .qty li{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:8px 0;border-top:1px solid var(--line);font-size:15px}
 .qty li:first-child{border-top:0}
+.cost{display:flex;flex-direction:column;gap:2px;margin:10px 0 0;padding:10px 12px;border-radius:12px;background:var(--warm-soft)}
+.cost b{font-size:16px;color:var(--ink)}
+.cost small{font-size:12px;line-height:1.5;color:var(--muted)}
+.pv-buy .cost{background:transparent;padding:10px 0 0;border-top:1px solid var(--line);border-radius:0}
 .qty li>span:first-child{min-width:0}
 .qty .n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:600;flex:none}
 .qty .who{display:block;font-size:12px;color:var(--muted);font-weight:400}
