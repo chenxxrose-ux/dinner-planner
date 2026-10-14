@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { MENU } from './menu'
 import {
-  addDays, aisleOf, cookWindow, fmtClock, parseClock, taipeiMinutes, dailySeed, drawMeal, fmtQty, fmtSauce, isLight, keysOf, parseIngInput, rng, roundQty,
-  sauceAmt, slotsFor, taipeiToday, totals, weekStart, type Pool,
+  addDays, aisleOf, cookWindow, fmtClock, forgotSwap, parseClock, taipeiMinutes, dailySeed, drawMeal, fmtQty, fmtSauce, isLight, keysOf, parseIngInput, rng, roundQty,
+  sauceAmt, slotsFor, taipeiToday, totals, weekStart, type Meal, type Pool,
 } from './meal'
 import type { People } from './types'
 import { STEPS, stepsOf } from './steps'
@@ -142,5 +142,27 @@ describe('做法', () => {
       for (const t of s) expect(t, d.name).not.toMatch(/味精/)
     }
     expect(Object.keys(STEPS).filter((k) => !MENU.some((d) => d.name === k))).toEqual([])
+  })
+})
+
+describe('沒買到', () => {
+  const p: Pool = { dishes: MENU, marks: {}, lastEaten: {}, today: '2026-10-14', diet: true }
+  const meal: Meal = { main: '蒜蓉蒸蝦', veg: '蒜炒白花椰', veg2: '蒜炒地瓜葉', soup: '減脂蔬菜湯' }
+  it('只換用到那樣材料的菜，換上的菜不用它', () => {
+    const { meal: out, changed } = forgotSwap(p, 3, meal, '板豆腐', { maxMin: 30, noHot: true }, rng('x'))
+    expect(changed.map((c) => c[0])).toEqual(['減脂蔬菜湯'])
+    expect(out.main).toBe('蒜蓉蒸蝦')
+    expect(out.veg).toBe('蒜炒白花椰')
+    const soup = MENU.find((d) => d.name === out.soup)!
+    expect(soup.type).toBe('soup')
+    expect(soup.ing.some(([n]) => n === '板豆腐')).toBe(false)
+    expect(isLight(soup)).toBe(true)
+  })
+  it('優先挑用已經買的材料就能做的', () => {
+    // 番茄買了：沒買到雞蛋時，番茄炒蛋要換；換上的主菜最好不用再買新東西
+    const m: Meal = { main: '番茄炒蛋', veg: '炒高麗菜', veg2: '蒜炒菠菜', soup: '紫菜蛋花湯' }
+    const { meal: out, changed } = forgotSwap(p, 3, m, '雞蛋', { maxMin: 0, noHot: true }, rng('y'))
+    expect(changed.map((c) => c[0]).sort()).toEqual(['番茄炒蛋', '紫菜蛋花湯'].sort())
+    for (const s of ['main', 'soup'] as const) expect(MENU.find((d) => d.name === out[s])!.ing.some(([n]) => n === '雞蛋')).toBe(false)
   })
 })

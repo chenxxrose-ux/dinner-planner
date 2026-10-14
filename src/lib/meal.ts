@@ -159,6 +159,40 @@ export function drawMeal(pool: Pool, n: People, r: () => number, fixed: Meal, op
   return fixed
 }
 
+// 沒買到某樣材料：用到它的菜換掉，優先換成「用已經買的材料就能做」的菜
+export function forgotSwap(pool: Pool, n: People, meal: Meal, missing: string, opts: DrawOpts, r: () => number) {
+  const slots = slotsFor(n, pool.diet)
+  const byName = new Map(pool.dishes.map((d) => [d.name, d]))
+  const uses = (d: Dish) => d.ing.some(([nm]) => nm === missing)
+  const hit = slots.filter((s) => meal[s] && byName.get(meal[s]!) && uses(byName.get(meal[s]!)!))
+  const bought = new Set<string>()
+  for (const s of slots) for (const [nm] of byName.get(meal[s] ?? '')?.ing ?? []) if (nm !== missing) bought.add(nm)
+  const out: Meal = { ...meal }
+  const changed: [string, string][] = []
+  for (const slot of hit) {
+    const old = out[slot]!
+    const keys = new Set<string>()
+    for (const s of slots) {
+      const other = s !== slot ? byName.get(out[s] ?? '') : undefined
+      if (other) keysOf(other).forEach((k) => keys.add(k))
+    }
+    const used = new Set(Object.values(out))
+    const ok = (d: Dish, maxMin: number) =>
+      d.type === typeOf(slot) && !used.has(d.name) && !uses(d) && !pool.marks[d.name]?.banned && !opts.exclude?.has(d.name) &&
+      !(maxMin && d.min > maxMin) && !(opts.noHot && d.hot) && !(pool.diet && !isLight(d)) && ![...keysOf(d)].some((k) => keys.has(k))
+    let list = pool.dishes.filter((d) => ok(d, opts.maxMin))
+    if (!list.length) list = pool.dishes.filter((d) => ok(d, 0))
+    if (!list.length) continue
+    // 要多買幾樣：越少越好，0 樣就是家裡現有的材料就能做
+    const extra = (d: Dish) => d.ing.filter(([nm]) => !bought.has(nm)).length
+    const best = Math.min(...list.map(extra))
+    const d = pickWeighted(list.filter((x) => extra(x) === best), r, pool)!
+    out[slot] = d.name
+    changed.push([old, d.name])
+  }
+  return { meal: out, changed }
+}
+
 export function dailySeed(day: string, n: People, s: { maxMin: number; noHot: boolean; diet: boolean }, reroll: number, extra = '') {
   return `${day}|${n}|${s.maxMin}|${s.noHot}|${s.diet}|${reroll}${extra}`
 }
