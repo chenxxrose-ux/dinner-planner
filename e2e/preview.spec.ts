@@ -31,8 +31,18 @@ test('下班前預覽今晚的菜，按「就煮這組」就固定', async ({ br
   await pv.locator('.pv-list li').first().getByRole('button', { name: /^不敢吃/ }).click()
   await expect(p.locator('.toast')).toContainText(`以後不會再出現「${gone}」`)
   await expect(pv.locator('.pv-list strong').first()).not.toHaveText(gone)
+  // 有記在資料庫：兩支手機都不會再出現
+  await expect.poll(async () => (await (await sql(`select banned from public.dp_marks where dish = '${gone}'`)).json())).toEqual([{ banned: true }])
   await p.locator('.toast').getByRole('button', { name: '復原' }).click()
   await expect(pv.locator('.pv-list strong').first()).toHaveText(gone)
+  // 換一道：只換那道，其他不動，也不會記成不敢吃
+  const before = await pv.locator('.pv-list strong').allTextContents()
+  await pv.locator('.pv-list li').nth(1).getByRole('button', { name: /^換掉/ }).click()
+  await expect(pv.locator('.pv-list strong').nth(1)).not.toHaveText(before[1])
+  const after = await pv.locator('.pv-list strong').allTextContents()
+  expect([after[0], after[2], after[3]]).toEqual([before[0], before[2], before[3]])
+  const marks = await (await sql(`select dish from public.dp_marks where dish = '${before[1]}' and banned`)).json()
+  expect(marks).toEqual([])
   // 換一組：預覽跟著換
   await pv.getByRole('button', { name: '換一組' }).click()
   await expect.poll(async () => (await pv.locator('.pv-list strong').allTextContents()).join()).not.toBe(first.join())
