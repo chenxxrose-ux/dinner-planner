@@ -2,14 +2,11 @@ import './globals.css'
 import { store } from '../features/data/store'
 import {
   AISLE_NAMES, KIND, SIZES, TOOL, addDays, cookWindow, dailySeed, daysAgo, drawMeal, fmtClock, fmtQty, fmtSauce, isLight, limitOf, mealName,
-  parseClock, taipeiMinutes,
+  parseClock, taipeiMinutes, DAY_CUTOFF, nightDay,
   parseIngInput, rng, roundQty, sauceAmt, sizeLabel, slotsFor, taipeiToday, totals, typeOf, weekday, type Meal, type Pool, type Slot,
 } from '../lib/meal'
 import { stepsOf } from '../lib/steps'
 import { findOut, mapUrl, pickOut, type When } from '../lib/eatout'
-import {
-  DAY_CUTOFF, DONE, NAME, OPTS, STEPS, baseSteps, routineDay, routineMinOf, routineNow, shiftOf, stateFor, toDay, todaySteps, type Person, type TodayStep,
-} from '../lib/routine'
 import type { Day, Dish, People } from '../lib/types'
 
 const WD = ['日', '一', '二', '三', '四', '五', '六']
@@ -27,22 +24,11 @@ const ui = {
   open: new Set<string>(),
   /** 加菜表單打到一半的內容：另一支手機改了東西、畫面重畫時不會被清掉 */
   draft: {} as Record<string, string>,
-  /** 作息：完整一天有沒有打開、正在改哪一種時間 */
-  rtOpen: false,
-  rtMode: '' as '' | 'today' | 'base',
   /** 吃外面：常吃的店有沒有打開 */
   eoOpen: false,
 }
-// 這支手機是誰在用（只記在這支手機）
-const ME_KEY = 'dinner-me'
-let me: Person | null = (() => {
-  try {
-    const v = localStorage.getItem(ME_KEY)
-    return v === 'a' || v === 's' ? v : null
-  } catch {
-    return null
-  }
-})()
+type Person = 'a' | 's'
+const NAME: Record<Person, string> = { a: '阿寶', s: '草莓' }
 const draftVal = (id: string, dflt = '') => esc(ui.draft[id] ?? dflt)
 
 const app = document.getElementById('app')!
@@ -153,7 +139,7 @@ function viewTonight() {
   const s = d.settings
   const today = taipeiToday()
   const n = s.people
-  if (store.data.days[routineDay()]?.eatOut) return viewEatOut()
+  if (store.data.days[nightDay()]?.eatOut) return viewEatOut()
   if (waitingOff()) return viewOffGate()
   const slots = slotsFor(n, s.diet)
   const { meal } = tonight()
@@ -166,7 +152,6 @@ function viewTonight() {
   return `
   <header><h1>今晚煮什麼</h1><span class="date">${dateLabel(today)}</span></header>
   ${banners()}
-  ${routineBlock()}
   ${peopleRow()}
   ${offInfo(row)}
   <section class="filters" aria-label="條件">
@@ -234,176 +219,6 @@ function howSection(ds: Dish[], n: People, diet: boolean) {
   </section>`
 }
 
-// ───── 作息 ─────
-// 平常的時間：阿寶的晚餐就是「想幾點吃」那個設定
-function rtBase() {
-  const s = store.data.settings
-  const b = baseSteps(s.routine)
-  // 「想幾點吃」比下班到家還早就不合理，至少等到家
-  const home = b.find((i) => i.key === 'aoff')!.at + s.commute
-  return baseSteps({ ...s.routine, aeat: Math.max(toDay(s.dinnerMin), home) })
-}
-/** 今天改過的時間（按了「我下班了」就用那個時間當阿寶下班） */
-function rtPlan(row = store.data.days[routineDay()]) {
-  const plan: Record<string, number> = { ...(row?.plan ?? {}) }
-  if (row?.offAt && row.avail !== null) plan.aoff = routineMinOf(row.offAt)
-  return plan
-}
-function rtToday() {
-  return todaySteps(rtBase(), rtPlan(), store.data.settings.commute)
-}
-// 留給草莓的那份：今晚的菜各留一份
-function boxText(row: Day | undefined) {
-  const ds = (row?.dishes ?? []).map(byName).filter(Boolean) as Dish[]
-  const main = ds.find((x) => x.type === 'main')
-  const veg = ds.find((x) => x.type === 'veg')
-  const soup = ds.find((x) => x.type === 'soup')
-  const parts = [main ? `${main.name}一份` : '主菜一份', veg ? `${veg.name}一份` : '青菜一份', '飯半碗', soup ? `${soup.name}一碗` : '']
-  return parts.filter(Boolean).map((x) => `<span>${esc(x)}</span>`).join('・')
-}
-function routineBlock() {
-  const rday = routineDay()
-  const row = store.data.days[rday]
-  const now = routineNow()
-  const list = rtToday()
-  const T = (k: string) => list.find((i) => i.key === k)!.m
-  const by = row?.planBy ? `・${NAME[row.planBy]}改的` : ''
-  const person = (p: Person) => {
-    const st = stateFor(list, p, now)
-    const d = shiftOf(list, p, now)
-    const cur = st.cur
-    const btns = cur && st.next && cur.key !== 'afree' ? `<div class="rt-btns">
-      <button class="rt-pill" data-rt="later" data-p="${p}">晚 15 分</button>
-      <button class="rt-pill rt-go" data-rt="done" data-p="${p}">${DONE[cur.key] ?? '好了，下一件'}</button></div>` : ''
-    return `<div class="rt-who"><div class="rt-av rt-${p}">${NAME[p]}</div>
-      <div class="rt-doing"><strong>${cur ? esc(cur.what) : '睡覺'}</strong>
-        <span class="rt-next">下一件 <b class="${st.next?.moved ? 'rt-red' : ''}">${st.next ? fmtClock(st.next.m) : fmtClock(rtBase()[0].at)}</b>${st.next ? esc(st.next.what) : '起床'}</span>
-        ${d ? `<em class="rt-late">${NAME[p]}今天${d > 0 ? `晚 ${d}` : `早 ${-d}`} 分鐘${by}</em>` : ''}${btns}
-        ${d ? `<button class="rt-undo" data-rt="undo" data-p="${p}">按錯了，${NAME[p]}改回平常</button>` : ''}</div></div>`
-  }
-  const mode = ui.rtMode
-  const rows: (TodayStep | (ReturnType<typeof rtBase>[number] & { m: number; moved: boolean }))[] =
-    mode === 'base' ? rtBase().map((i) => ({ ...i, m: i.at, moved: false })) : list
-  const cur = list.filter((i) => i.m <= now).pop()
-  const tl = rows.map((i) => {
-    const cls = mode ? '' : i.key === cur?.key ? 'cur' : i.m < now ? 'past' : ''
-    const tm = mode
-      ? `<select class="rt-tin${mode === 'today' && i.moved ? ' rt-red' : ''}" id="rt-${i.key}" data-rtkey="${i.key}" aria-label="${NAME[i.who]}${esc(i.what)}的時間">${OPTS.map((v) => `<option value="${v}" ${v === i.m ? 'selected' : ''}>${fmtClock(v)}</option>`).join('')}</select>`
-      : `<span class="rt-tm${i.moved ? ' rt-red' : ''}">${fmtClock(i.m)}</span>`
-    return `<li class="${cls}">${tm}<span class="rt-tag rt-${i.who}">${NAME[i.who]}</span><span class="rt-tx">${esc(i.what)}</span></li>`
-  }).join('')
-  const changed = !!row?.plan && Object.keys(row.plan).length > 0
-
-  const snackTime = now >= T('soff') && now < T('gym') + 5
-  const fridgeTime = now >= T('ride') && now < T('sbath')
-  const out = row?.eatOut ? findOut(row.eatOut.s, store.data.settings.out.mine) : undefined
-  const showBox = !row?.eatOut && now >= T('aoff') && now < T('ride')
-  const boxedAt = row?.boxedAt ? fmtClock(taipeiMinutes(new Date(row.boxedAt))) : ''
-
-  return `
-  ${me ? '' : `<div class="rt-me"><span>這支手機是誰在用？</span><div><button class="rt-pill" data-me="a">阿寶</button><button class="rt-pill" data-me="s">草莓</button></div></div>`}
-  <section class="rt-now" aria-label="現在">
-    <div class="rt-head"><b>現在</b><span class="rt-clock">${fmtClock(now)}</span></div>
-    ${person('a')}
-    ${person('s')}
-    <details class="rt-day" ${ui.rtOpen || mode ? 'open' : ''}><summary>${mode ? '改時間' : '看完整一天'}</summary>
-      ${mode ? `<div class="seg rt-seg" role="group" aria-label="改哪一種">
-        <button data-rtmode="today" aria-pressed="${mode === 'today'}">只改今天</button>
-        <button data-rtmode="base" aria-pressed="${mode === 'base'}">改平常的時間</button></div>
-        <p class="rt-tip">${mode === 'today' ? '改一件，同一個人後面的事會一起挪。明天自動恢復。' : '以後每天都照這個時間，兩支手機同步。'}</p>` : ''}
-      <ol class="rt-tl" aria-label="作息">${tl}</ol>
-      <div class="rt-foot">${mode
-        ? `${mode === 'today' && changed ? '<button class="link" data-rt="reset">今天照平常</button>' : '<span></span>'}<button class="btn btn-main" data-rt="editdone">改好了</button>`
-        : `<span>${changed ? `今天有改過時間${by}` : ''}</span><button class="link" data-rt="edit">改時間</button>`}</div>
-    </details>
-  </section>
-  ${snackTime ? `<div class="rt-nudge"><div><b>草莓，運動前先吃一點</b><span>香蕉或無糖豆漿，空腹運動容易頭暈</span></div>
-    <button class="btn rt-leaf" data-rt="snack" ${row?.snackAt ? 'disabled' : ''}>${row?.snackAt ? '吃了 ✓' : '吃了'}</button></div>` : ''}
-  ${fridgeTime && row?.eatOut ? `<div class="rt-nudge"><div><b>運動完去買：${esc(row.eatOut.s)}</b><span>${esc(out?.tip ?? '')}</span></div>
-    ${out ? `<a class="btn rt-leaf eo-map" href="${mapUrl(out)}" target="_blank" rel="noopener">附近的店</a>` : ''}</div>` : ''}
-  ${fridgeTime && !row?.eatOut ? `<div class="rt-nudge"><div><b>${boxedAt ? `冰箱有你的晚餐（${boxedAt} 裝好）` : '阿寶還沒按「裝好了」'}</b><span>${boxedAt ? '微波 2 分鐘，湯另外熱' : '打開冰箱看看，或問一下阿寶'}</span></div></div>` : ''}
-  ${showBox ? `<section class="rt-box" aria-label="留給草莓">
-    <div class="rt-bhead"><b>留給草莓・${fmtClock(T('seat'))} 吃</b>${boxedAt ? `<span class="rt-ok">✓ ${boxedAt} 裝好</span>` : ''}</div>
-    <p class="rt-blist">${boxText(row)}</p>
-    ${boxedAt ? '<button class="link" data-rt="unbox">還沒裝好</button>' : '<button class="btn btn-main" data-rt="box">裝好放冰箱了</button>'}
-  </section>` : ''}`
-}
-function rtSetPlan(key: string, min: number) {
-  const rday = routineDay()
-  const plan = { ...(store.data.days[rday]?.plan ?? {}), [key]: min }
-  store.run('dp_days', { day: rday, plan, plan_by: me })
-}
-function rtClick(ds: DOMStringMap) {
-  const rday = routineDay()
-  const now = routineNow()
-  if (ds.me) {
-    me = ds.me as Person
-    try {
-      localStorage.setItem(ME_KEY, me)
-    } catch {
-      /* 存不了就每次問 */
-    }
-    return render()
-  }
-  if (ds.rtmode) {
-    ui.rtMode = ds.rtmode as 'today' | 'base'
-    return render()
-  }
-  switch (ds.rt) {
-    case 'later':
-    case 'done': {
-      const p = ds.p as Person
-      const nx = stateFor(rtToday(), p, now).next
-      if (!nx) return
-      // 阿寶按「下班了」就是「我下班了」：排今晚的菜
-      if (ds.rt === 'done' && nx.key === 'aoff') return offWork(false)
-      const before = store.data.days[rday]
-      const prev = { plan: before?.plan ?? null, plan_by: before?.planBy ?? null }
-      rtSetPlan(nx.key, ds.rt === 'later' ? Math.max(nx.m, now) + 15 : now)
-      // 按錯可以馬上復原
-      return toast(ds.rt === 'later' ? `${NAME[p]}後面的事往後 15 分鐘` : `${NAME[p]}：${nx.what}`, () =>
-        store.run('dp_days', { day: rday, ...prev }),
-      )
-    }
-    case 'undo': {
-      // 這個人今天改過的時間全部拿掉，回到平常
-      const p = ds.p as Person
-      const mine = new Set(STEPS.filter((i) => i.who === p).map((i) => i.key))
-      const left = Object.fromEntries(Object.entries(store.data.days[rday]?.plan ?? {}).filter(([k]) => !mine.has(k)))
-      const has = Object.keys(left).length > 0
-      store.run('dp_days', { day: rday, plan: has ? left : null, plan_by: has ? (store.data.days[rday]?.planBy ?? null) : null })
-      // 阿寶的下班時間來自「我下班了」，一起改回還沒下班
-      if (p === 'a' && store.data.days[taipeiToday()]?.offAt) store.run('dp_days', { day: taipeiToday(), off_at: null, avail_min: null, cooked: false })
-      return toast(`${NAME[p]}今天照平常的時間`)
-    }
-    case 'edit':
-      ui.rtMode = 'today'
-      return render()
-    case 'editdone':
-      ui.rtMode = ''
-      ui.rtOpen = false
-      return render()
-    case 'reset':
-      store.run('dp_days', { day: rday, plan: null, plan_by: null })
-      return toast('今天照平常的時間')
-    case 'box':
-      store.run('dp_days', { day: rday, boxed_at: new Date().toISOString() })
-      return toast('草莓到家會看到')
-    case 'unbox':
-      return store.run('dp_days', { day: rday, boxed_at: null })
-    case 'snack':
-      return store.run('dp_days', { day: rday, snack_at: new Date().toISOString() })
-  }
-}
-function rtChange(key: string, v: number) {
-  if (ui.rtMode === 'base') {
-    // 阿寶的晚餐時間就是「想幾點吃」
-    if (key === 'aeat') return store.run('dp_settings', { id: 1, dinner_min: v % 1440 })
-    return store.run('dp_settings', { id: 1, routine: { ...store.data.settings.routine, [key]: v } })
-  }
-  rtSetPlan(key, v)
-}
-
 // ───── 下班 ─────
 const COMMUTES = [0, 10, 15, 20, 30, 40, 45, 60, 90]
 function peopleRow() {
@@ -419,7 +234,6 @@ function viewOffGate() {
   return `
  <header><h1>今晚煮什麼</h1><span class="date">${dateLabel(taipeiToday())}</span></header>
   ${banners()}
-  ${routineBlock()}
   <section class="offwork" aria-label="下班">
     <b class="ow-title">下班了嗎？</b>
     <p class="ow-sub">按下去，照你到家的時間排今晚的菜。</p>
@@ -473,14 +287,14 @@ function drawOut(day: string, salt: string, cur?: { a: string; s: string }) {
   return { a, s: sv }
 }
 function startEatOut() {
-  const day = routineDay()
+  const day = nightDay()
   store.run('dp_days', { day, eat_out: drawOut(day, '') })
   toast('今天吃外面，幫你們各抽了一個')
   window.scrollTo(0, 0)
 }
 function eoCard(p: Person, name: string, when: string) {
   const x = findOut(name, store.data.settings.out.mine)
-  return `<div class="eo-card"><div class="eo-who"><span class="rt-av rt-${p}">${NAME[p]}</span><span>${when}</span></div>
+  return `<div class="eo-card"><div class="eo-who"><span class="eo-av eo-${p}">${NAME[p]}</span><span>${when}</span></div>
     ${x ? `<strong class="eo-name">${esc(x.name)}</strong><p class="eo-tip">${esc(x.tip)}</p>
     <div class="eo-btns"><a class="btn btn-main eo-map" href="${mapUrl(x)}" target="_blank" rel="noopener">附近的店 ↗</a>
       <button class="btn btn-ghost" data-eo="re" data-p="${p}">換一個</button>
@@ -488,20 +302,17 @@ function eoCard(p: Person, name: string, when: string) {
     : `<p class="eo-tip">沒有可以抽的了，到下面「不想吃的」恢復幾個。</p>`}</div>`
 }
 function viewEatOut() {
-  const day = routineDay()
+  const day = nightDay()
   const row = store.data.days[day]!
   const e = row.eatOut!
   const s = store.data.settings
-  const list = rtToday()
-  const T = (k: string) => list.find((i) => i.key === k)!.m
   const whenOpt = (v: string, l: string) => `<option value="${v}" ${(ui.draft.eoWhen ?? 'both') === v ? 'selected' : ''}>${l}</option>`
   return `
   <header><h1>今晚吃外面</h1><span class="date">${dateLabel(day)}</span></header>
   ${banners()}
-  ${routineBlock()}
   <section class="eo" aria-label="今天吃外面">
-    ${eoCard('a', e.a, `${fmtClock(T('aoff'))} 下班先吃`)}
-    ${eoCard('s', e.s, `${fmtClock(T('ride'))} 運動完去買${s.diet ? '・減重點法' : ''}`)}
+    ${eoCard('a', e.a, `下班先吃`)}
+    ${eoCard('s', e.s, `運動完去買${s.diet ? '・減重點法' : ''}`)}
     <p class="eo-note">按「附近的店」會打開地圖搜尋${esc('鳳山五甲')}附近，看標「營業中」的那幾家。半夜不是每家都開。</p>
   </section>
   <details class="eo-mine" ${ui.eoOpen ? 'open' : ''}><summary>我們常吃的店${s.out.mine.length ? `（${s.out.mine.length}）` : ''}</summary>
@@ -518,7 +329,7 @@ function viewEatOut() {
   <div class="foot"><span></span><button data-act="signout">登出</button></div>`
 }
 function eoClick(ds: DOMStringMap) {
-  const day = routineDay()
+  const day = nightDay()
   const row = store.data.days[day]
   const s = store.data.settings
   const p = ds.p as Person
@@ -757,14 +568,6 @@ document.addEventListener('toggle', (e) => {
     ui.eoOpen = el.open
     return
   }
-  if (el.classList?.contains('rt-day')) {
-    ui.rtOpen = el.open
-    if (!el.open && ui.rtMode) {
-      ui.rtMode = ''
-      render()
-    }
-    return
-  }
   if (!el.classList?.contains('lib-how')) return
   const name = el.dataset.name!
   if (el.open) ui.open.add(name)
@@ -793,11 +596,10 @@ document.addEventListener('click', (e) => {
     document.getElementById('how-' + ds.how)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     return
   }
-  if (ds.rt || ds.rtmode || ds.me) return rtClick(ds)
   if (ds.eo) return eoClick(ds)
   if (ds.act === 'eatout') return startEatOut()
   if (ds.act === 'cookin') {
-    const day = routineDay()
+    const day = nightDay()
     const prev = store.data.days[day]?.eatOut ?? null
     store.run('dp_days', { day, eat_out: null })
     window.scrollTo(0, 0)
@@ -894,7 +696,6 @@ document.addEventListener('change', (e) => {
     const m = parseClock(t.value)
     if (m !== null) store.run('dp_settings', { id: 1, dinner_min: m })
   }
-  if (t.dataset.rtkey) rtChange(t.dataset.rtkey, Number(t.value))
   if (t.dataset.shop !== undefined) store.run('dp_shop', { week: store.data.week, item: t.dataset.shop, done: t.checked })
 })
 
@@ -948,7 +749,7 @@ document.addEventListener('submit', async (e) => {
 })
 
 store.subscribe(render)
-// 「今晚」每 30 秒更新：作息的現在、還沒下班時可以煮幾分鐘（正在選時間時不打斷）
+// 「今晚」每 30 秒更新：還沒下班時可以煮幾分鐘（正在選時間時不打斷）
 setInterval(() => {
   const busy = document.activeElement && ['INPUT', 'SELECT'].includes(document.activeElement.tagName)
   if (store.phase === 'ready' && ui.tab === 'tonight' && !busy) render()

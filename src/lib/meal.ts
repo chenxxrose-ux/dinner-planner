@@ -30,7 +30,7 @@ export const HEAVY = new Set([
   '滷肉', '糖醋排骨', '回鍋肉', '螞蟻上樹', '紅燒獅子頭', '宮保雞丁', '三杯雞', '三杯中卷', '三杯杏鮑菇', '鹽酥雞',
   '蜜汁叉燒', '氣炸豬排', '氣炸五花肉', '鳳梨蝦球', '瓜仔肉', '豉汁蒸排骨', '咖哩雞', '馬鈴薯燉肉', '菜脯蛋', '京醬肉絲',
   '韓式燒肉', '蒜泥白肉', '照燒雞腿', '氣炸雞翅', '麻婆豆腐', '奶油杏鮑菇', '奶油玉米', '玉米濃湯', '玉米排骨湯', '蘿蔔排骨湯',
-  '冬瓜排骨湯', '貢丸湯', '魚丸湯', '餛飩湯', '酸辣湯', '皮蛋豆腐', '香菇雞湯', '蒜頭雞湯', '打拋豬', '沙茶牛肉', '黑胡椒牛柳',
+  '冬瓜排骨湯', '貢丸湯', '魚丸湯', '餛飩湯', '酸辣湯', '皮蛋豆腐', '香菇雞湯', '蒜頭雞湯', '打拋豬', '沙茶牛肉', '黑胡椒牛柳', '香菇蒸肉餅',
 ])
 export const isLight = (d: Dish) => !HEAVY.has(d.name)
 // 減重時優先的蛋白質：豆、魚、蛋，再來才是肉（211 餐盤建議的順序）
@@ -322,4 +322,12 @@ export function parseIngInput(txt: string): [string, number, string][] {
     else out.push([tok, 1, '份'])
   }
   return out
+}
+
+/** 凌晨 5 點前還算前一天的晚上（草莓運動完半夜才吃） */
+export const DAY_CUTOFF = 5 * 60
+/** 晚餐的「今天」：凌晨 5 點前還算昨天 */
+export function nightDay(now = new Date()) {
+  const t = taipeiToday(now)
+  return taipeiMinutes(now) < DAY_CUTOFF ? addDays(t, -1) : t
 }
