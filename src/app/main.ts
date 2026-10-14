@@ -173,7 +173,7 @@ function viewTonight() {
         <div class="dname">${x
           ? `<strong>${esc(x.name)}${d.marks[x.name]?.fav ? '<span class="tag">愛吃</span>' : ''}</strong><small>${TOOL[x.tool]}・${x.min} 分・<button class="rec" data-how="${esc(x.name)}">做法 ↓</button></small>`
           : '<span class="empty-dish">沒有符合條件的菜，放寬時間試試</span>'}</div>
-        <div class="acts">${x ? `<button class="lock" data-lock="${slot}" aria-pressed="${!!ui.locks[slot]}" aria-label="${ui.locks[slot] ? '取消固定' : '固定這道'}">${ui.locks[slot] ? '已固定' : '固定'}</button><button class="nope" data-nope="${slot}" aria-label="不敢吃${esc(x.name)}，以後不要這道">不敢吃</button>` : ''}</div></div>`
+        <div class="acts">${x ? `<button class="lock" data-swap="${slot}" aria-label="換掉${esc(x.name)}，只換這道">換一道</button><button class="nope" data-nope="${slot}" aria-label="不敢吃${esc(x.name)}，以後不要這道">不敢吃</button>` : ''}</div></div>`
     }).join('')}
     <p class="tools">${Object.entries(tools).map(([k, v]) => `${TOOL[k as Dish['tool']]} ${v}`).join('・')}，可以同時開工</p>
   </section>
@@ -265,7 +265,7 @@ function previewBlock() {
   const t = totals(ds.map((x) => ({ d: x, n: s.people })), s.diet)
   return `<section class="pv" aria-label="今晚預覽">
     <div class="pv-head"><b>先看今晚的菜</b><span>${s.people} 人・約 ${Math.max(...ds.map((x) => x.min))} 分鐘</span></div>
-    <ul class="pv-list">${rows.map(([sl, x]) => `<li><span class="kind k-${x.type}">${KIND[x.type]}</span><span class="pv-name"><strong>${esc(x.name)}</strong><small>${TOOL[x.tool]}・${x.min} 分</small></span><button class="nope" data-nope="${sl}" aria-label="不敢吃${esc(x.name)}，以後不要這道">不敢吃</button></li>`).join('')}</ul>
+    <ul class="pv-list">${rows.map(([sl, x]) => `<li><span class="kind k-${x.type}">${KIND[x.type]}</span><span class="pv-name"><strong>${esc(x.name)}</strong><small>${TOOL[x.tool]}・${x.min} 分</small></span><span class="pv-acts"><button class="lock" data-swap="${sl}" aria-label="換掉${esc(x.name)}，只換這道">換一道</button><button class="nope" data-nope="${sl}" aria-label="不敢吃${esc(x.name)}，以後不要這道">不敢吃</button></span></li>`).join('')}</ul>
     <details class="pv-buy" ${ui.pvOpen ? 'open' : ''}><summary>到全聯要買（${t.food.length} 樣）</summary>${qtyList(t.food)}</details>
     <p class="pv-tip">要先去買菜就按「就煮這組」，下班後菜就不會換。</p>
     <div class="actions"><button class="btn btn-ghost" data-act="shuffle">換一組</button><button class="btn btn-main" data-act="cook">就煮這組</button></div>
@@ -643,6 +643,23 @@ document.addEventListener('click', (e) => {
   if ('diet' in ds) {
     setSetting({ diet: !data.settings.diet })
     return toast(store.data.settings.diet ? '減重模式：只抽少油少鹽的菜' : '已關掉減重模式')
+  }
+  if (ds.swap) {
+    // 換一道：只換這一道，其他不動；這道以後還是會出現
+    const slot = ds.swap as Slot
+    const { meal } = tonight()
+    const name = meal[slot]
+    if (!name) return
+    const prev = { ...meal }
+    const fixed: Meal = { ...meal }
+    delete fixed[slot]
+    const s = store.data.settings
+    const o = { ...drawOpts(), exclude: new Set([name]) }
+    const next = drawMeal(pool(), s.people, rng(`${taipeiToday()}|swap|${name}|${Date.now()}`), fixed, o)
+    if (!next[slot] || next[slot] === name) return toast('沒有別道可以換了，放寬時間試試')
+    saveTonight(next, { cooked: false })
+    toast(`「${name}」換成「${next[slot]}」`, () => saveTonight(prev))
+    return
   }
   if (ds.lock) {
     const slot = ds.lock as Slot
