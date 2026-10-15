@@ -7,6 +7,7 @@ import {
 } from '../lib/meal'
 import { stepsOf } from '../lib/steps'
 import { costText } from '../lib/price'
+import { leftIdeas, leftKinds, type LeftKind, type Leftover } from '../lib/leftover'
 import { findOut, mapUrl, pickOut, type When } from '../lib/eatout'
 import type { Day, Dish, People } from '../lib/types'
 
@@ -29,6 +30,10 @@ const ui = {
   pvOpen: false,
   /** 吃外面：常吃的店有沒有打開 */
   eoOpen: false,
+  /** 剩菜變新菜：有沒有打開、勾了哪些、自己加的剩菜 */
+  left: false,
+  leftPick: new Set<string>(),
+  leftMine: [] as Leftover[],
 }
 type Person = 'a' | 's'
 const NAME: Record<Person, string> = { a: '阿寶', s: '草莓' }
@@ -184,6 +189,7 @@ function viewTonight() {
   ${row?.cooked
     ? `<div class="cooked">✓ 今晚就煮這個，已加進買菜清單</div>`
     : `<div class="daily"><span>${row?.reroll ? `今天換過 ${row.reroll} 次` : '每天自動抽一組，同一餐不會撞食材'}</span><button class="link" data-act="eatout">今天不煮，吃外面</button></div>`}
+  ${leftEntry()}
   ${s.diet ? `<section class="plate" aria-label="草莓的盤子">
     <div class="plate-fig" aria-hidden="true"><span class="q veg">菜</span><span class="q veg">菜</span><span class="q pro">主菜</span><span class="q carb">飯</span></div>
     <div class="plate-txt"><b>草莓的盤子：211 餐盤</b>
@@ -256,6 +262,7 @@ function viewOffGate() {
     <button class="btn btn-ghost ow-out" data-act="eatout">今天吃外面</button>
     <button class="link ow-home" data-act="home">今天在家，直接排</button>
   </section>
+  ${leftEntry()}
   ${peopleRow()}
   <div class="foot"><span></span><button data-act="signout">登出</button></div>`
 }
@@ -286,6 +293,57 @@ function offInfo(row: Day | undefined) {
     <b>${row.avail < limit ? `時間很趕，只排 ${limit} 分鐘內的菜` : `可以煮 ${limit} 分鐘`}</b>
     ${limit < 40 ? '<small>電子鍋煮飯要 40 分鐘左右：早上出門前先預約，或用冷凍白飯。</small>' : ''}</div>
     <button class="ow-undo" data-act="reoff">按錯了</button></div>`
+}
+
+// ───── 剩菜變新菜 ─────
+// 最近兩天煮過的菜和白飯列出來勾；勾一下，下面馬上換成可以做的菜
+const LEFT_KIND: [LeftKind[], string][] = [[['meat'], '主菜'], [['meat', 'sauce'], '滷的燒的'], [['veg'], '青菜'], [['soup'], '湯'], [['rice'], '飯']]
+const leftEntry = () =>
+  `<button class="lo-entry" data-act="left"><b>冰箱有剩菜剩飯？</b><span>勾一勾，馬上變成新的一餐</span></button>`
+function leftItems(): (Leftover & { when: string })[] {
+  const today = taipeiToday()
+  const out: (Leftover & { when: string })[] = [{ name: '白飯', kinds: ['rice'], when: '' }]
+  const seen = new Set(['白飯'])
+  ;[0, 1, 2].forEach((ago) => {
+    const row = store.data.days[addDays(today, -ago)]
+    if (!row?.cooked || !row.dishes) return
+    for (const n of row.dishes) {
+      const x = byName(n)
+      if (!x || seen.has(n)) continue
+      seen.add(n)
+      out.push({ name: n, kinds: leftKinds(x), when: ['今天', '昨天', '前天'][ago] })
+    }
+  })
+  for (const m of ui.leftMine) if (!seen.has(m.name)) out.push({ ...m, when: '自己加的' })
+  return out
+}
+function viewLeft() {
+  const items = leftItems()
+  const picked = items.filter((x) => ui.leftPick.has(x.name))
+  const ideas = leftIdeas(picked, store.data.settings.diet)
+  return `<header><h1>剩菜變新菜</h1><button class="link" data-act="leftback">回今晚</button></header>
+  ${banners()}
+  <section class="lo" aria-label="冰箱裡剩什麼">
+    <b class="lo-title">冰箱裡剩什麼？</b>
+    <p class="lo-sub">最近兩天煮過的菜都在這裡，勾了下面馬上換。</p>
+    <div class="chips">${items.map((x) => `<button class="chip" data-left="${esc(x.name)}" aria-pressed="${ui.leftPick.has(x.name)}">${esc(x.name)}${x.when ? `<small> ${x.when}</small>` : ''}</button>`).join('')}</div>
+    <form id="loForm" class="lo-add">
+      <label for="loName" class="sr">其他剩的</label><input id="loName" class="input" placeholder="例如：炸雞" value="${draftVal('loName')}">
+      <label for="loKind" class="sr">是哪一種</label><select id="loKind" class="input">${LEFT_KIND.map(([, l], i) => `<option value="${i}" ${ui.draft.loKind === String(i) ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      <button class="btn btn-ghost">加</button>
+    </form>
+  </section>
+  ${!picked.length
+    ? '<div class="blank">勾上面剩的菜或白飯，<br>就會出現可以做的菜和做法。</div>'
+    : !ideas.length
+      ? '<div class="blank">這幾樣比較難變新菜，<br>再勾白飯或湯試試看。</div>'
+      : ideas.map(({ idea, used, steps }, i) => `<details class="lo-card" ${i === 0 ? 'open' : ''}>
+    <summary><span class="lo-name"><b>${esc(idea.name)}</b><small>${idea.min} 分・${idea.tool}${idea.light ? '・比較輕盈' : ''}</small></span><span class="lo-n">用到 ${used.length} 樣</span></summary>
+    <p class="lo-use">用到：${esc(used.join('、'))}</p>
+    ${idea.add.length ? `<p class="lo-need">家裡要有：${esc(idea.add.join('、'))}</p>` : ''}
+    <ol class="steps">${steps.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>
+  </details>`).join('')}
+  <p class="note">剩菜放冰箱 2 天內吃完，加熱要整個熱透再吃。</p>`
 }
 
 // ───── 吃外面 ─────
@@ -539,7 +597,7 @@ function render() {
     return
   }
   tabs.hidden = false
-  app.innerHTML = { tonight: viewTonight, week: viewWeek, lib: viewLib, shop: viewShop }[ui.tab]()
+  app.innerHTML = ui.tab === 'tonight' && ui.left ? viewLeft() : { tonight: viewTonight, week: viewWeek, lib: viewLib, shop: viewShop }[ui.tab]()
   tabs.innerHTML = TABS.map(([k, l]) => `<button data-tab="${k}" ${ui.tab === k ? 'aria-current="page"' : ''}>${ICONS[k]}<span>${l}</span></button>`).join('')
   if (focusId) {
     const i = document.getElementById(focusId) as HTMLInputElement | null
@@ -611,6 +669,7 @@ document.addEventListener('click', (e) => {
   const data = store.data
   if (ds.tab) {
     ui.tab = ds.tab as Tab
+    ui.left = false
     render()
     window.scrollTo(0, 0)
     return
@@ -627,6 +686,11 @@ document.addEventListener('click', (e) => {
     return
   }
   if (ds.eo) return eoClick(ds)
+  if (ds.act === 'left' || ds.act === 'leftback') {
+    ui.left = ds.act === 'left'
+    render()
+    return window.scrollTo(0, 0)
+  }
   if (ds.act === 'eatout') return startEatOut()
   if (ds.act === 'cookin') {
     const day = nightDay()
@@ -648,6 +712,11 @@ document.addEventListener('click', (e) => {
   if ('diet' in ds) {
     setSetting({ diet: !data.settings.diet })
     return toast(store.data.settings.diet ? '減重模式：只抽少油少鹽的菜' : '已關掉減重模式')
+  }
+  if (ds.left !== undefined) {
+    if (ui.leftPick.has(ds.left)) ui.leftPick.delete(ds.left)
+    else ui.leftPick.add(ds.left)
+    return render()
   }
   if (ds.miss) {
     // 沒買到：用到這樣材料的菜換掉，優先換成用已經買的材料就能做的
@@ -742,12 +811,12 @@ document.addEventListener('input', (e) => {
   if (t.id === 'libQ') {
     ui.libQ = t.value
     render()
-  } else if (t.closest?.('#addForm') || t.closest?.('#eoForm')) ui.draft[t.id] = t.value
+  } else if (t.closest?.('#addForm') || t.closest?.('#eoForm') || t.closest?.('#loForm')) ui.draft[t.id] = t.value
 })
 
 document.addEventListener('change', (e) => {
   const t = e.target as HTMLInputElement
-  if (t.closest?.('#addForm') || t.closest?.('#eoForm')) ui.draft[t.id] = t.value
+  if (t.closest?.('#addForm') || t.closest?.('#eoForm') || t.closest?.('#loForm')) ui.draft[t.id] = t.value
   if (t.id === 'commute') store.run('dp_settings', { id: 1, commute_min: Number(t.value) })
   if (t.id === 'dinnerAt') {
     const m = parseClock(t.value)
@@ -773,6 +842,15 @@ document.addEventListener('submit', async (e) => {
     btn.textContent = '登入'
     errEl.textContent = err
     return
+  }
+  if (f.id === 'loForm') {
+    const name = (document.getElementById('loName') as HTMLInputElement).value.trim()
+    const kinds = LEFT_KIND[Number((document.getElementById('loKind') as HTMLSelectElement).value)][0]
+    if (!name) return
+    if (!ui.leftMine.some((m) => m.name === name)) ui.leftMine.push({ name, kinds })
+    ui.leftPick.add(name)
+    delete ui.draft.loName
+    return render()
   }
   if (f.id === 'eoForm') {
     const s = store.data.settings
